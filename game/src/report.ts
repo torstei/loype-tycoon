@@ -188,12 +188,13 @@ export function writeReport(input: ReportInput): Report {
   }
   const depthLine = `Snødybde ca. ${Math.round(weather.snowDepthAt(low))} cm nederst (${low} moh) og ${Math.round(weather.snowDepthAt(high))} cm øverst (${high} moh).`;
 
-  const areaRows: { name: string; condition: Condition; groomedShare: number }[] = [...groups.entries()]
+  const areaRows: { name: string; condition: Condition; groomedShare: number; trampledShare: number }[] = [...groups.entries()]
     .sort((a, b) => b[1].length - a[1].length)
     .map(([name, tiles]) => ({
       name,
       condition: worst(tiles.map(([x, y]) => tracks.condition(x, y, weather))),
       groomedShare: tiles.filter(([x, y]) => now - tracks.groomedAt[map.index(x, y)] < 14).length / tiles.length,
+      trampledShare: tiles.filter(([x, y]) => tracks.trampled(x, y)).length / tiles.length,
     }));
   const headline = worst(all.map(([x, y]) => tracks.condition(x, y, weather)));
 
@@ -202,6 +203,7 @@ export function writeReport(input: ReportInput): Report {
     if (a.condition === "icy") warnings.push(`Isete partier ved ${a.name}. Ta det rolig i nedkjøringene.`);
     if (a.condition === "bare") warnings.push(`Steinete ved ${a.name}. Ta gamle ski.`);
     if (a.condition === "snowed") warnings.push(`Ved ${a.name} er sporet ikke kjørt etter snøfallet.`);
+    if (a.trampledShare > 0.1) warnings.push(`Elgen har gått i sporet ved ${a.name}.`);
   }
 
   const [today] = weather.forecast(day, 1);

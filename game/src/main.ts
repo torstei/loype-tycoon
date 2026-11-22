@@ -143,6 +143,7 @@ async function main() {
       fleet.update(hours, clock.hours, clock.hourOfDay, tracks, weather, ledger);
       crowd.update(hours, clock, weather, tracks);
       skijorer.update(hours, clock, tracks);
+      whimsy.simulate(hours, tracks, clock.hours, (x, y) => crowd.near(x, y, 5));
       sinceRedraw += hours;
       if (sinceRedraw >= 0.25) {
         sinceRedraw = 0;
@@ -418,6 +419,22 @@ async function main() {
       const crossing = tracks.crossing[map.index(x, y)] as Crossing;
       if (crossing !== Crossing.None) {
         drawCrossing(x, y, crossing);
+      } else if (tracks.trampled(x, y)) {
+        drawHoofprints(x, y);
+      }
+    }
+  };
+
+  /** Cloven hoofprints punched through the corduroy, staggered like a walking moose. */
+  const drawHoofprints = (x: number, y: number) => {
+    const { ux, uy, vx, vy } = trackAxes(x, y);
+    const cx = (x + 0.5) * PX;
+    const cy = (y + 0.5) * PX;
+    for (const [along, side] of [[-5.5, -1.8], [-1.5, 1.8], [2.5, -1.8], [6.5, 1.8]]) {
+      const px = cx + ux * along + vx * side;
+      const py = cy + uy * along + vy * side;
+      for (const half of [-0.7, 0.7]) {
+        trackLayer.ellipse(px + vx * half, py + vy * half, 0.8, 0.8).fill({ color: 0x3f4c66, alpha: 0.85 });
       }
     }
   };
@@ -526,9 +543,10 @@ async function main() {
       const since = clock.hours - tracks.groomedAt[i];
       const groomed = Number.isFinite(since) ? `preppet for ${since < 1 ? "under en time" : `${Math.floor(since)} t`} siden` : "aldri preppet";
       const crossing = tracks.crossing[i] as Crossing;
-      action = `${crossing !== Crossing.None ? `🌉 ${CROSSING_NAMES[crossing]}<br>` : ""}<strong>Løype: ${CONDITION_NAMES[tracks.condition(x, y, weather)]}</strong>
+      action = `${crossing !== Crossing.None ? `🌉 ${CROSSING_NAMES[crossing]}<br>` : ""}${tracks.trampled(x, y) ? "🫎 elgspor i sporet<br>" : ""}<strong>Løype: ${CONDITION_NAMES[tracks.condition(x, y, weather)]}</strong>
         (${Math.round(tracks.quality(x, y, weather) * 100)} %)<br>
-        nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}`;
+        nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}<br>
+        ≈ ${Math.round(tracks.usage[i])} skiløpere siste døgnet`;
     } else if (tool === "garage") {
       action = fleet.canPlace(x, y, tracks) ? `Garasje: ${kr(fleet.nextGarageCost)}` : "Kan ikke sette garasje her";
     }

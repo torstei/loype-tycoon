@@ -1,7 +1,9 @@
 import { Container, Graphics, Text } from "pixi.js";
 import { GameMap } from "./map";
 import { hash, housePosition, PX } from "./render";
+import { remoteness } from "./remote";
 import { Flag, Terrain } from "./terrain";
+import { TrackNetwork } from "./tracks";
 
 export interface View {
   x0: number;
@@ -146,6 +148,14 @@ class MooseBody {
   }
 }
 
+/** Tiles per game hour: an unhurried moose. */
+const MOOSE_SPEED = 15;
+
+const TRAMPLE_QUOTES = ["Nypreppet! Mine favoritter.", "Så fint og flatt å gå her.", "Hvem har laget denne fine stien til meg?", "Klopp, klopp, klopp."];
+
+/** What a moose decided this step, for the caller to react to. */
+type MooseEvent = "track" | null;
+
 class Moose {
   readonly sprite = new Container();
   x: number;
@@ -153,6 +163,14 @@ class Moose {
   private tx: number;
   private ty: number;
   private rest = 0;
+  /** Tiles left to follow a track before wandering off again. */
+  private trackSteps = 0;
+  /** Game hours before this moose fancies another walk along a track. */
+  private trackCooldown = Math.random() * 4;
+  private walkedTrack = false;
+  private previousTile: [number, number] | null = null;
+  private tile: [number, number];
+  private moved = 0;
   private time = Math.random() * 10;
   private stride = 0;
   private amp = 0;
@@ -167,26 +185,138 @@ class Moose {
 
   constructor(
     private readonly map: GameMap,
+    private readonly remote: Float32Array,
     x: number,
     y: number,
   ) {
     this.x = this.tx = x;
     this.y = this.ty = y;
+    this.tile = [Math.floor(x / PX), Math.floor(y / PX)];
     this.body.root.scale.set(1.7);
     this.sprite.addChild(this.body.root);
   }
 
-  private walkable(px: number, py: number): boolean {
-    const tx = Math.floor(px / PX);
-    const ty = Math.floor(py / PX);
+  private walkable(tx: number, ty: number): boolean {
     return this.map.inside(tx, ty) && this.map.terrainAt(tx, ty) !== Terrain.Built && !this.map.has(tx, ty, Flag.Building);
   }
 
-  update(dt: number) {
-    this.time += dt;
-    const walking = this.rest <= 0 && Math.hypot(this.tx - this.x, this.ty - this.y) >= 2;
+  private remoteAt(tx: number, ty: number): number {
+    return this.remote[this.map.index(tx, ty)];
+  }
+
+  /** Somewhere nearby, preferably further from people. */
+  private chooseWanderTarget() {
+    const [cx, cy] = this.tile;
+    let best: [number, number] | null = null;
+    let bestScore = -1;
+    for (let tries = 0; tries < 14; tries++) {
+      const nx = cx + Math.round((Math.random() - 0.5) * 28);
+      const ny = cy + Math.round((Math.random() - 0.5) * 28);
+      if (!this.walkable(nx, ny)) {
+        continue;
+      }
+      const score = (0.05 + this.remoteAt(nx, ny) ** 2) * Math.random();
+      if (score > bestScore) {
+        bestScore = score;
+        best = [nx, ny];
+      }
+    }
+    if (best) {
+      this.tx = (best[0] + 0.5) * PX;
+      this.ty = (best[1] + 0.5) * PX;
+    }
+  }
+
+  /** Next tile along the track, never straight back where it came from if it can help it. */
+  private followTrack(tracks: TrackNetwork): boolean {
+    const [x, y] = this.tile;
+    const options = tracks
+      .neighbours(x, y)
+      .filter(([nx, ny]) => !this.previousTile || nx !== this.previousTile[0] || ny !== this.previousTile[1])
+      .filter(([nx, ny]) => this.remoteAt(nx, ny) > 0.1);
+    if (options.length === 0) {
+      return false;
+    }
+    const [nx, ny] = options[Math.floor(Math.random() * options.length)];
+    this.tx = (nx + 0.5) * PX;
+    this.ty = (ny + 0.5) * PX;
+    return true;
+  }
+
+  /** Move and decide in game time. */
+  simulate(hours: number, tracks: TrackNetwork, now: number, peopleNear: (x: number, y: number) => boolean): MooseEvent {
+    let event: MooseEvent = null;
+    this.trackCooldown -= hours;
     if (this.rest > 0) {
-      this.rest -= dt;
+      this.rest -= hours;
+      return null;
+    }
+    let budget = hours * MOOSE_SPEED * PX;
+    while (budget > 0) {
+      const dx = this.tx - this.x;
+      const dy = this.ty - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 0.5) {
+        // Moose shy away from people: skiers nearby, or a stretch they use a lot, ends the walk.
+        const disturbed = peopleNear(...this.tile) || Math.random() < tracks.disturbance(...this.tile) * 0.3;
+        if (this.trackSteps > 0 && !disturbed && tracks.has(...this.tile) && this.followTrack(tracks)) {
+          this.trackSteps--;
+          continue;
+        }
+        if (this.trackSteps > 0 || this.walkedTrack) {
+          this.trackCooldown = 4 + Math.random() * 6;
+          this.walkedTrack = false;
+        }
+        this.trackSteps = 0;
+        this.rest = 0.3 + Math.random() * 1.2;
+        this.chooseWanderTarget();
+        return event;
+      }
+      const step = Math.min(d, budget);
+      this.x += (dx / d) * step;
+      this.y += (dy / d) * step;
+      this.moved += step;
+      budget -= step;
+      if (Math.abs(dx) > 0.5) {
+        this.targetFacing = dx < 0 ? -1 : 1;
+      }
+      const tile: [number, number] = [Math.floor(this.x / PX), Math.floor(this.y / PX)];
+      if (tile[0] !== this.tile[0] || tile[1] !== this.tile[1]) {
+        this.previousTile = this.tile;
+        this.tile = tile;
+        if (tracks.has(...tile)) {
+          const remote = this.remoteAt(...tile);
+          if (peopleNear(...tile)) {
+            // Skiers right there: step back into the trees.
+            tracks.trample(tile[0], tile[1], 0.25, now);
+            this.trackSteps = 0;
+            this.chooseWanderTarget();
+          } else if (this.trackSteps > 0) {
+            tracks.trample(tile[0], tile[1], 0.6, now);
+          } else {
+            tracks.trample(tile[0], tile[1], 0.25, now);
+            // Out in the wilds a groomed track is the best path a moose ever had.
+            const quiet = 1 - tracks.disturbance(...tile);
+            if (this.trackCooldown <= 0 && Math.random() < (0.05 + 0.55 * remote) * quiet) {
+              this.walkedTrack = true;
+              this.trackSteps = Math.round(6 + Math.random() * 20 * remote);
+              this.tx = this.x;
+              this.ty = this.y;
+              event = "track";
+            }
+          }
+        }
+      }
+    }
+    return event;
+  }
+
+  animate(dt: number) {
+    this.time += dt;
+    const walking = this.moved > 0.01;
+    this.stride += this.moved * 0.45;
+    this.moved = 0;
+    if (!walking) {
       this.moodTimer -= dt;
       if (this.moodTimer <= 0) {
         this.grazing = Math.random() < 0.7;
@@ -195,34 +325,10 @@ class Moose {
           this.earTimer = 0.4;
         }
       }
-    } else if (!walking) {
-      this.rest = 3 + Math.random() * 7;
-      this.grazing = true;
-      this.moodTimer = 1 + Math.random() * 2;
-      for (let tries = 0; tries < 10; tries++) {
-        const nx = this.x + (Math.random() - 0.5) * PX * 16;
-        const ny = this.y + (Math.random() - 0.5) * PX * 16;
-        if (this.walkable(nx, ny)) {
-          this.tx = nx;
-          this.ty = ny;
-          break;
-        }
-      }
-    } else {
-      const dx = this.tx - this.x;
-      const dy = this.ty - this.y;
-      const d = Math.hypot(dx, dy);
-      const speed = 9 * this.amp;
-      this.x += (dx / d) * speed * dt;
-      this.y += (dy / d) * speed * dt;
-      this.stride += dt * 7;
-      if (Math.abs(dx) > 0.5) {
-        this.targetFacing = dx < 0 ? -1 : 1;
-      }
     }
 
     const approach = (v: number, target: number, rate: number) => v + (target - v) * Math.min(1, dt * rate);
-    this.amp = approach(this.amp, walking ? 1 : 0, 4);
+    this.amp = approach(this.amp, walking ? 1 : 0, 6);
     this.facing = approach(this.facing, this.targetFacing, 7);
     const headTarget = walking ? 0 : this.grazing ? 0.8 + Math.sin(this.time * 7) * 0.06 : -0.12;
     this.headAngle = approach(this.headAngle, headTarget, 3);
@@ -390,6 +496,7 @@ export class Whimsy {
   readonly moose: Moose[] = [];
   private readonly chimneys: { x: number; y: number; phase: number }[] = [];
   readonly train: Train | null;
+  readonly remote: Float32Array;
   private time = 0;
   detail = true;
 
@@ -409,18 +516,18 @@ export class Whimsy {
       }
     }
 
-    const forest: [number, number][] = [];
+    this.remote = remoteness(map);
+    const wilds: [number, number][] = [];
     for (let ty = 0; ty < map.height; ty++) {
       for (let tx = 0; tx < map.width; tx++) {
-        if (map.terrainAt(tx, ty) === Terrain.Forest && map.flags[map.index(tx, ty)] === 0) {
-          forest.push([tx, ty]);
+        if (map.terrainAt(tx, ty) === Terrain.Forest && map.flags[map.index(tx, ty)] === 0 && this.remote[map.index(tx, ty)] > 0.5) {
+          wilds.push([tx, ty]);
         }
       }
     }
-    for (let i = 0; i < 9 && forest.length; i++) {
-      const [tx, ty] = forest[Math.floor(hash(i, 7, 92) * forest.length)];
-      const m = new Moose(map, (tx + 0.5) * PX, (ty + 0.5) * PX);
-      this.moose.push(m);
+    for (let i = 0; i < 9 && wilds.length; i++) {
+      const [tx, ty] = wilds[Math.floor(hash(i, 7, 92) * wilds.length)];
+      this.moose.push(new Moose(map, this.remote, (tx + 0.5) * PX, (ty + 0.5) * PX));
     }
 
     this.layer.addChild(this.smoke, ...this.moose.map((m) => m.sprite));
@@ -439,10 +546,22 @@ export class Whimsy {
     return true;
   }
 
+  /** The moose live in game time: they stand still when the game is paused. */
+  simulate(hours: number, tracks: TrackNetwork, now: number, peopleNear: (x: number, y: number) => boolean) {
+    const steps = Math.max(1, Math.ceil(hours / 0.05));
+    for (const m of this.moose) {
+      for (let i = 0; i < steps; i++) {
+        if (m.simulate(hours / steps, tracks, now, peopleNear) === "track" && this.detail && Math.random() < 0.3) {
+          this.bubbles.say(TRAMPLE_QUOTES[Math.floor(Math.random() * TRAMPLE_QUOTES.length)], () => ({ x: m.x, y: m.y - 30 }));
+        }
+      }
+    }
+  }
+
   update(dt: number, view: View) {
     this.time += dt;
     for (const m of this.moose) {
-      m.update(dt);
+      m.animate(dt);
       m.sprite.visible = this.detail;
     }
     this.train?.update(dt);

@@ -126,6 +126,9 @@ export class TrackNetwork {
   readonly wet: Float32Array;
   readonly groomedAt: Float64Array;
   readonly crossing: Uint8Array;
+  readonly trampledAt: Float64Array;
+  /** Recent skier passes, fading with a half-life of about 17 game hours. */
+  readonly usage: Float32Array;
 
   constructor(private readonly map: GameMap) {
     const n = map.width * map.height;
@@ -135,6 +138,8 @@ export class TrackNetwork {
     this.wet = new Float32Array(n);
     this.groomedAt = new Float64Array(n).fill(-Infinity);
     this.crossing = new Uint8Array(n);
+    this.trampledAt = new Float64Array(n).fill(-Infinity);
+    this.usage = new Float32Array(n);
   }
 
   has(x: number, y: number): boolean {
@@ -194,6 +199,8 @@ export class TrackNetwork {
     this.ice[i] = 0;
     this.wet[i] = 0;
     this.groomedAt[i] = -Infinity;
+    this.trampledAt[i] = -Infinity;
+    this.usage[i] = 0;
   }
 
   neighbours(x: number, y: number): [number, number][] {
@@ -240,6 +247,28 @@ export class TrackNetwork {
     return depth >= MIN_GROOMING_DEPTH && (this.newSnow[i] >= 3 || this.ice[i] >= 0.4 || this.fresh[i] < 0.7);
   }
 
+  /** A moose walked here: deep hoofprints in the corduroy until the next grooming. */
+  trample(x: number, y: number, amount: number, now: number) {
+    const i = this.map.index(x, y);
+    this.fresh[i] = Math.max(0, this.fresh[i] - amount);
+    this.trampledAt[i] = now;
+  }
+
+  trampled(x: number, y: number): boolean {
+    const i = this.map.index(x, y);
+    return this.trampledAt[i] > this.groomedAt[i];
+  }
+
+  /** A skier passed: counts towards how busy, and so how un-moosey, this stretch is. */
+  use(x: number, y: number) {
+    this.usage[this.map.index(x, y)] += 1;
+  }
+
+  /** 0 (nobody comes here) … 1 (busy enough that moose keep away). */
+  disturbance(x: number, y: number): number {
+    return 1 - Math.exp(-this.usage[this.map.index(x, y)] / 15);
+  }
+
   /** Skis wear the corduroy down a little with every pass. */
   wear(x: number, y: number, amount: number) {
     const i = this.map.index(x, y);
@@ -258,7 +287,9 @@ export class TrackNetwork {
 
   /** Let the weather work on every track tile. snow is cm, rain mm, both at the reference elevation. */
   applyWeather(hours: number, weather: Weather, snow: number, rain: number) {
+    const fade = Math.exp(-hours / 24);
     for (const i of this.tiles) {
+      this.usage[i] *= fade;
       const elevation = this.map.elevation[i];
       const t = weather.localTemperature(elevation);
       const snowHere = t < 0.8 ? snow : 0;

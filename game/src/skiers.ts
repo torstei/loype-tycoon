@@ -51,6 +51,7 @@ const COMPLAINTS = {
   fresh: ["Nydelig spor!", "Dette er livet!", "Strålende preppet!", "Rett i Vipps-en!"],
   short: ["Var det alt?", "Rundt og rundt og rundt…"],
   road: ["Ta av skiene, ta på skiene…", "Bilene stopper ikke for skiløpere!", "Hvem legger løype over en bilvei?", "Asfalt. Mine stakkars ski."],
+  moose: ["Elgen har vært her igjen!", "Hull i sporet. Takk, elg.", "Klassisk spor med elgmønster.", "Noen bør snakke med den elgen."],
   trunk: ["Et vogntog! Et VOGNTOG!", "Jeg har stått her i ti minutter!", "Hvem fant på å legge løypa over Rv. 4?!", "Livet passerte revy. To ganger."],
 };
 
@@ -279,6 +280,7 @@ class Skier {
     const q = tracks.quality(x, y, weather);
     this.qualitySum += Math.pow(q, 0.6 * this.kind.fussiness);
     tracks.wear(x, y, this.kind.wear);
+    tracks.use(x, y);
     const atGrade = (t: [number, number] | null) => !!t && tracks.crossing[map.index(t[0], t[1])] === Crossing.AtGrade;
     // Penalties and waiting apply once per crossing, not once per tile of road width.
     if (atGrade([x, y]) && !atGrade(this.previous)) {
@@ -290,6 +292,9 @@ class Skier {
         this.said = true;
         say(this, pick(level >= 3 ? COMPLAINTS.trunk : COMPLAINTS.road));
       }
+    } else if (!this.said && tracks.trampled(x, y) && Math.random() < 0.12) {
+      this.said = true;
+      say(this, pick(COMPLAINTS.moose));
     } else if (!this.said && Math.random() < 0.015) {
       const c = tracks.condition(x, y, weather);
       if (c !== "ok") {
@@ -491,6 +496,11 @@ export class Crowd {
     private readonly earn: (amount: number) => void,
   ) {
     this.trailheads = findTrailheads(map);
+  }
+
+  /** Whether any skier is within r tiles of a tile right now. */
+  near(x: number, y: number, r: number): boolean {
+    return this.skiers.some((s) => Math.abs(s.px - (x + 0.5)) < r && Math.abs(s.py - (y + 0.5)) < r);
   }
 
   /** Which trailheads have a track close enough to walk to, and how much track they lead to. */

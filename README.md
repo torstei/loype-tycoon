@@ -61,6 +61,12 @@ recommendation and what the local Facebook group made of yesterday. The day's re
 made rosier (“Pynt på den ✨”): more skiers come, but if the tracks disappoint them it costs
 more satisfaction and reputation, and the Facebook group will remember.
 
+Moose keep to the remote parts of the map, away from houses, roads and the railway. When one
+comes across a groomed track out there it often follows it for a while, leaving hoofprints
+in the corduroy until the snowcat has been along again; tracks close to the village are
+rarely visited. Moose are shy, too: a stretch that sees a lot of skiers is mostly left
+alone, and a moose that meets skiers on the track heads back into the trees. Skiers and the føremelding both have opinions about it.
+
 Early in the morning and late in the evening, a red-bearded man skijors through the valley
 with his two huskies, Manu and Nanook. Click them.
 
