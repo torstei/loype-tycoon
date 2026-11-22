@@ -8,8 +8,11 @@ export interface Poi {
 }
 
 export interface MapLine {
-  kind: "road" | "forest_road" | "rail" | "path" | "stream" | "piste";
+  /** road_name lines are not drawn; they only say which road is where. */
+  kind: "road" | "forest_road" | "rail" | "path" | "stream" | "piste" | "road_name";
   pts: [number, number][];
+  name?: string;
+  traffic?: number;
 }
 
 interface MapDocument {
@@ -77,6 +80,31 @@ export class GameMap {
     return (this.flags[this.index(x, y)] & flag) !== 0;
   }
 
+  /** How busy the road on a tile is: 0 none, 1 local road, 2 county road, 3 trunk road. */
+  traffic(x: number, y: number): number {
+    return (this.flags[this.index(x, y)] >> 8) & 3;
+  }
+
+  /** The name of the road on a tile: the nearest road of the same class, null if it has no name. */
+  roadName(x: number, y: number): string | null {
+    const traffic = this.traffic(x, y);
+    let best: string | null = null;
+    let bestD = 2.5;
+    for (const l of this.lines) {
+      if (l.kind !== "road_name" || l.traffic !== traffic) {
+        continue;
+      }
+      for (let i = 1; i < l.pts.length; i++) {
+        const d = segmentDistance(x + 0.5, y + 0.5, l.pts[i - 1], l.pts[i]);
+        if (d < bestD) {
+          bestD = d;
+          best = l.name ?? null;
+        }
+      }
+    }
+    return best;
+  }
+
   elevationAt(x: number, y: number): number {
     return this.elevation[this.index(x, y)];
   }
@@ -92,4 +120,11 @@ export class GameMap {
     }
     return (steepest / this.tileSize) * 100;
   }
+}
+
+function segmentDistance(px: number, py: number, [ax, ay]: [number, number], [bx, by]: [number, number]): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const t = dx || dy ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }

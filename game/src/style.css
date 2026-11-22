@@ -76,3 +76,19 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #report .fbhead { font-size: 12px; font-weight: 700; color: #3b5998; margin-bottom: 4px; }
 #report .comment { background: #f0f2f5; border-radius: 12px; padding: 5px 9px; margin: 4px 0; font-size: 12px; }
 #report .likes { color: #65676b; font-size: 11px; margin-left: 4px; }
+#crossing { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(15, 30, 60, 0.35); z-index: 10; }
+#crossing[hidden] { display: none; }
+#crossing .card { width: min(480px, calc(100vw - 32px)); background: #fffdf6; border: 3px solid #23323d; border-radius: 10px;
+  padding: 14px 16px; box-shadow: 0 12px 40px rgba(10, 20, 40, 0.4); }
+#crossing h3 { margin: 0 0 4px; }
+#crossing .lead { margin: 0 0 10px; color: #4b5a64; }
+#crossing button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; font: inherit; margin: 6px 0;
+  padding: 8px 10px; background: #fff; border: 2px solid #c6d0da; border-radius: 8px; cursor: pointer; }
+#crossing button:hover:not(:disabled) { border-color: #1f5fd1; background: #f2f6ff; }
+#crossing button:disabled { opacity: 0.5; cursor: not-allowed; }
+#crossing .key { min-width: 28px; text-align: center; font-weight: 800; color: #1f5fd1; }
+#crossing .what { flex: 1; }
+#crossing .what small { color: #4b5a64; }
+#crossing .price { font-weight: 700; white-space: nowrap; }
+#crossing .price.short { color: #c0392b; }
+#crossing .cancel { border-style: dashed; }

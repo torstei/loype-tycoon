@@ -5,7 +5,103 @@ import { Weather } from "./weather";
 /** Below this snow depth a groomer only scrapes gravel. */
 export const MIN_GROOMING_DEPTH = 15;
 
-const ROAD_CROSSING = 2000;
+/** How a track tile gets across a road or the railway. */
+export enum Crossing {
+  None = 0,
+  /** Straight over the road: skis off, look both ways. */
+  AtGrade = 1,
+  Culvert = 2,
+  Bridge = 3,
+  /** A bridge or underpass that was already there. */
+  Existing = 4,
+  /** Under the railway, built by the club at great expense. */
+  Underpass = 5,
+}
+
+export type Obstacle = "road" | "rail";
+
+export interface CrossingOption {
+  type: Crossing;
+  name: string;
+  price: number;
+  note: string;
+}
+
+export interface RoadTraffic {
+  describe: string;
+  levelPrice: number;
+  levelNote: string;
+  /** Wider roads need longer culverts and bridges. */
+  structureFactor: number;
+  /** What each level crossing does to a skier's mood. */
+  skierPenalty: number;
+  /** Longest wait for a gap in the traffic, in game hours. */
+  skierWait: number;
+  groomerWait: number;
+  /** Chance per level crossing that the snowcat holds up the traffic. */
+  incident: number;
+}
+
+export const ROAD_TRAFFIC: Record<1 | 2 | 3, RoadTraffic> = {
+  1: {
+    describe: "Lite trafikk. En og annen traktor.",
+    levelPrice: 200,
+    levelNote: "Helt greit her. Skiløperne knapt merker det, men maskina kan ikke preppe asfalt.",
+    structureFactor: 0.6,
+    skierPenalty: 0.98,
+    skierWait: 0.02,
+    groomerWait: 0,
+    incident: 0,
+  },
+  2: {
+    describe: "Fylkesvei. Biler i 50–60 km/t.",
+    levelPrice: 400,
+    levelNote: "Skiløperne må ta av seg skiene og se seg godt for. Maskina kan ikke preppe asfalt.",
+    structureFactor: 1,
+    skierPenalty: 0.9,
+    skierWait: 0.08,
+    groomerWait: 0.08,
+    incident: 0,
+  },
+  3: {
+    describe: "Riksvei. Vogntog i 70 km/t, døgnet rundt.",
+    levelPrice: 1_500,
+    levelNote: "Et eventyr. Skiløperne står i kø for en luke i trafikken, og Gunnar likeså. Det vil bli skrevet om i Facebook-gruppa.",
+    structureFactor: 2.2,
+    skierPenalty: 0.72,
+    skierWait: 0.25,
+    groomerWait: 0.3,
+    incident: 0.04,
+  },
+};
+
+export function roadTraffic(level: number): RoadTraffic {
+  return ROAD_TRAFFIC[Math.max(1, Math.min(3, level)) as 1 | 2 | 3];
+}
+
+export function crossingOptions(obstacle: Obstacle, traffic: number): CrossingOption[] {
+  if (obstacle === "rail") {
+    return [
+      { type: Crossing.Underpass, name: "Undergang under jernbanen", price: 120_000, note: "Det eneste lovlige. Jernbaneeieren krever betong, sikring og tre skjemaer i trippel." },
+    ];
+  }
+  const t = roadTraffic(traffic);
+  const structure = (price: number) => Math.round((price * t.structureFactor) / 500) * 500;
+  return [
+    { type: Crossing.AtGrade, name: "Rett over veien", price: t.levelPrice, note: t.levelNote },
+    { type: Crossing.Culvert, name: "Kulvert under veien", price: structure(18_000), note: "Sporet går under veien. Ingen klager." },
+    { type: Crossing.Bridge, name: "Skibru over veien", price: structure(30_000), note: "Flott utsikt over trafikken. Folk elsker en bru." },
+  ];
+}
+
+export const CROSSING_NAMES: Record<Crossing, string> = {
+  [Crossing.None]: "",
+  [Crossing.AtGrade]: "rett over veien",
+  [Crossing.Culvert]: "kulvert under veien",
+  [Crossing.Bridge]: "skibru over veien",
+  [Crossing.Existing]: "eksisterende bru/undergang",
+  [Crossing.Underpass]: "undergang under jernbanen",
+};
 const ORTHOGONAL = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const DIAGONAL = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
 const NEIGHBOURS = [...ORTHOGONAL, ...DIAGONAL];
@@ -29,6 +125,7 @@ export class TrackNetwork {
   readonly ice: Float32Array;
   readonly wet: Float32Array;
   readonly groomedAt: Float64Array;
+  readonly crossing: Uint8Array;
 
   constructor(private readonly map: GameMap) {
     const n = map.width * map.height;
@@ -37,18 +134,45 @@ export class TrackNetwork {
     this.ice = new Float32Array(n);
     this.wet = new Float32Array(n);
     this.groomedAt = new Float64Array(n).fill(-Infinity);
+    this.crossing = new Uint8Array(n);
   }
 
   has(x: number, y: number): boolean {
     return this.map.inside(x, y) && this.tiles.has(this.map.index(x, y));
   }
 
-  /** Price of a new track tile, or null where track cannot go. */
-  cost(x: number, y: number): number | null {
-    if (!this.map.inside(x, y) || this.map.has(x, y, Flag.Rail) || this.map.has(x, y, Flag.Building)) {
+  traffic(x: number, y: number): number {
+    return this.map.traffic(x, y);
+  }
+
+  roadName(x: number, y: number): string | null {
+    return this.map.roadName(x, y);
+  }
+
+  index(x: number, y: number): number {
+    return this.map.index(x, y);
+  }
+
+  /** What has to be crossed here, or null if the tile is open ground or already has a passage. */
+  obstacle(x: number, y: number): Obstacle | null {
+    if (!this.map.inside(x, y) || this.map.has(x, y, Flag.Passage)) {
       return null;
     }
-    const base = BUILD_COST[this.map.terrainAt(x, y)];
+    return this.map.has(x, y, Flag.Rail) ? "rail" : this.map.has(x, y, Flag.Road) ? "road" : null;
+  }
+
+  /** Price of a new track tile before any crossing, or null where track cannot go. */
+  cost(x: number, y: number): number | null {
+    if (!this.map.inside(x, y)) {
+      return null;
+    }
+    const corridor = this.map.has(x, y, Flag.Rail) || this.map.has(x, y, Flag.Road);
+    // A house touching the edge of a road tile does not stand on the road itself.
+    if (this.map.has(x, y, Flag.Building) && !corridor) {
+      return null;
+    }
+    // Roads and the railway run through built-up land; crossing them is priced separately.
+    const base = BUILD_COST[this.map.terrainAt(x, y)] ?? (corridor ? 150 : null);
     if (base === null) {
       return null;
     }
@@ -56,13 +180,14 @@ export class TrackNetwork {
     if (slope > 40) {
       return null;
     }
-    const roads = this.map.has(x, y, Flag.Road) ? ROAD_CROSSING : 0;
-    return Math.round(base * (1 + slope / 8) + roads);
+    return Math.round(base * (1 + slope / 8));
   }
 
-  add(x: number, y: number) {
+  add(x: number, y: number, crossing = Crossing.None) {
     const i = this.map.index(x, y);
     this.tiles.add(i);
+    const existing = this.map.has(x, y, Flag.Passage) && (this.map.has(x, y, Flag.Rail) || this.map.has(x, y, Flag.Road));
+    this.crossing[i] = existing ? Crossing.Existing : crossing;
     // A new track is just a line of footprints until a groomer has been along.
     this.fresh[i] = 0.35;
     this.newSnow[i] = 0;
@@ -78,6 +203,9 @@ export class TrackNetwork {
   /** 0 (unskiable) … 1 (perfect corduroy). */
   quality(x: number, y: number, weather: Weather): number {
     const i = this.map.index(x, y);
+    if (this.crossing[i] === Crossing.AtGrade) {
+      return 0.5;
+    }
     const depth = weather.snowDepthAt(this.map.elevationAt(x, y));
     const snowFactor = Math.min(1, depth / MIN_GROOMING_DEPTH);
     const buried = 1 - Math.min(1, this.newSnow[i] / 10);
@@ -86,6 +214,9 @@ export class TrackNetwork {
 
   condition(x: number, y: number, weather: Weather): Condition {
     const i = this.map.index(x, y);
+    if (this.crossing[i] === Crossing.AtGrade) {
+      return "ok";
+    }
     if (weather.snowDepthAt(this.map.elevationAt(x, y)) < MIN_GROOMING_DEPTH * 0.6) {
       return "bare";
     }
@@ -102,7 +233,7 @@ export class TrackNetwork {
   /** Whether a groomer would make a noticeable difference here. */
   needsGrooming(x: number, y: number, weather: Weather, now: number): boolean {
     const i = this.map.index(x, y);
-    if (now - this.groomedAt[i] < 12) {
+    if (now - this.groomedAt[i] < 12 || this.crossing[i] === Crossing.AtGrade) {
       return false;
     }
     const depth = weather.snowDepthAt(this.map.elevationAt(x, y));
@@ -152,7 +283,9 @@ export class TrackNetwork {
   }
 
   remove(x: number, y: number) {
-    this.tiles.delete(this.map.index(x, y));
+    const i = this.map.index(x, y);
+    this.tiles.delete(i);
+    this.crossing[i] = Crossing.None;
   }
 
   get size(): number {

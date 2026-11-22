@@ -30,6 +30,13 @@ Controls (press `H` in the game for the full list):
   wheel steps through the zoom levels. On a touchpad, pinch zooms and two-finger scroll pans.
 - **Time**: Space pauses, `,`/`.` slow down / speed up (1×–16×; a game day is about five
   minutes at 1×). The season runs from 1 December to 31 March.
+- **Crossings**: when a track reaches a road, a dialog offers a level crossing (cheap, but
+  skiers have to take their skis off and the snowcat cannot groom asphalt), a culvert or a
+  bridge. How much it matters depends on the road: crossing a quiet local road on the level
+  is no bother, a county road costs a little goodwill, and crossing Rv. 4 is an adventure —
+  skiers queue for a gap, the snowcat waits too and now and then holds up the trucks, and
+  culverts and bridges there cost about twice as much. The railway cannot be crossed on the level: use an existing bridge or underpass
+  (taken from the OSM data, shown as "bru/undergang" on hover) or pay for a new underpass.
 - **Grooming**: tool `4` places a garage next to the track; the first comes with the
   club's old snowcat. Machines go out when tracks need it (by default only at night),
   groom their way round the network and drive home. Diesel is paid per tile groomed.

@@ -23,6 +23,8 @@ export interface ReportInput {
   rainSinceLast: number;
   yesterday: DayStats | null;
   yesterdayHyped: boolean;
+  /** Things the snowcats got up to on the roads since the last report. */
+  incidents: string[];
 }
 
 const ROSY: Record<Condition, string> = {
@@ -115,11 +117,14 @@ function worst(conditions: Condition[]): Condition {
 
 function comments(input: ReportInput): string[] {
   const y = input.yesterday;
+  const lines: string[] = [];
+  if (input.incidents.length > 0) {
+    lines.push(pick(["Løypemaskina sto midt i Rv. 4 i går kveld. Kø helt til Grua. 😡", "Takk til løypelaget for at jeg fikk se en løypemaskin på riksveien. Barna jublet. Vogntoget mindre.", "Er det lov å kjøre tråkkemaskin over Rv. 4? Spør for en vogntogsjåfør."], input.day));
+  }
   if (!y || y.skiers === 0) {
-    return [];
+    return withLikes(lines, input.day);
   }
   const happy = y.finished > 0 ? y.satisfaction / y.finished : 0;
-  const lines: string[] = [];
   if (input.yesterdayHyped && happy < 0.6) {
     lines.push("«Strålende forhold» sto det. Strålende for skøyteløpere, kanskje.");
   }
@@ -134,9 +139,13 @@ function comments(input: ReportInput): string[] {
     lines.push(pick(["Fullt på parkeringen fra kl. 10. Kom med toget, folkens!", "Kø i sporet i går. KØ."], input.day + 1));
   }
   lines.push(pick(["Hvem eier den blå Volvoen som står på tvers på P Hakadal?", "Noen som har sett en grønn vott ved Skansen?", "Er det lov å ha med seg kjelke i lysløypa? Spør for en venn.", "Elgen sto midt i sporet igjen. Den så ikke lei seg ut.", "Møtte en rødskjegget kar med to huskyer nede i dalen kl. 06. Så jeg syner?", "Hvem er det som suser forbi med to huskyer hver kveld? Hundene smilte til meg."], input.day + 2));
+  return withLikes(lines, input.day);
+}
+
+function withLikes(lines: string[], day: number): string[] {
   return lines.map((text, i) => {
-    const likes = 3 + Math.abs(Math.floor(Math.sin((input.day + i) * 12.3) * 40));
-    return `<div class="comment"><strong>${pick(COMMENTERS, input.day * 7 + i)}</strong> ${text} <span class="likes">👍 ${likes}</span></div>`;
+    const likes = 3 + Math.abs(Math.floor(Math.sin((day + i) * 12.3) * 40));
+    return `<div class="comment"><strong>${pick(COMMENTERS, day * 7 + i)}</strong> ${text} <span class="likes">👍 ${likes}</span></div>`;
   });
 }
 

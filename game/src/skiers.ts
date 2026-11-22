@@ -3,7 +3,7 @@ import { GameClock, holiday, isWeekend, sunTimes } from "./clock";
 import { GameMap } from "./map";
 import { PX } from "./render";
 import { Flag } from "./terrain";
-import { TrackNetwork } from "./tracks";
+import { Crossing, roadTraffic, TrackNetwork } from "./tracks";
 import { Weather } from "./weather";
 
 export type TrailheadKind = "station" | "parking" | "homes";
@@ -50,6 +50,8 @@ const COMPLAINTS = {
   worn: ["Sporet er helt nedkjørt.", "Har dere glemt løypemaskina?"],
   fresh: ["Nydelig spor!", "Dette er livet!", "Strålende preppet!", "Rett i Vipps-en!"],
   short: ["Var det alt?", "Rundt og rundt og rundt…"],
+  road: ["Ta av skiene, ta på skiene…", "Bilene stopper ikke for skiløpere!", "Hvem legger løype over en bilvei?", "Asfalt. Mine stakkars ski."],
+  trunk: ["Et vogntog! Et VOGNTOG!", "Jeg har stått her i ti minutter!", "Hvem fant på å legge løypa over Rv. 4?!", "Livet passerte revy. To ganger."],
 };
 
 function pick<T>(xs: T[]): T {
@@ -209,6 +211,10 @@ class Skier {
   private readonly visited = new Set<number>();
   private travelled = 0;
   private qualitySum = 0;
+  /** Multiplied down a little at every level crossing, a lot at a busy one. */
+  private roadMood = 1;
+  /** Game hours left standing at the roadside waiting for a gap. */
+  private waiting = 0;
   private home: [number, number][] | null = null;
   private stride = Math.random() * 6;
   private readonly lane = (Math.random() - 0.5) * 3;
@@ -235,8 +241,13 @@ class Skier {
   }
 
   update(hours: number, map: GameMap, tracks: TrackNetwork, weather: Weather, say: (s: Skier, text: string) => void) {
+    if (this.waiting > 0) {
+      const w = Math.min(this.waiting, hours);
+      this.waiting -= w;
+      hours -= w;
+    }
     let budget = hours * this.kind.speed;
-    while (budget > 0 && !this.done) {
+    while (budget > 0 && !this.done && this.waiting <= 0) {
       const cx = this.target[0] + 0.5;
       const cy = this.target[1] + 0.5;
       const dist = Math.hypot(cx - this.px, cy - this.py);
@@ -268,7 +279,18 @@ class Skier {
     const q = tracks.quality(x, y, weather);
     this.qualitySum += Math.pow(q, 0.6 * this.kind.fussiness);
     tracks.wear(x, y, this.kind.wear);
-    if (!this.said && Math.random() < 0.015) {
+    const atGrade = (t: [number, number] | null) => !!t && tracks.crossing[map.index(t[0], t[1])] === Crossing.AtGrade;
+    // Penalties and waiting apply once per crossing, not once per tile of road width.
+    if (atGrade([x, y]) && !atGrade(this.previous)) {
+      const level = Math.max(tracks.traffic(x, y), ...tracks.neighbours(x, y).filter(atGrade).map(([nx, ny]) => tracks.traffic(nx, ny)));
+      const traffic = roadTraffic(level);
+      this.roadMood *= traffic.skierPenalty;
+      this.waiting = Math.random() * traffic.skierWait;
+      if (!this.said && Math.random() < (level >= 3 ? 0.5 : level === 2 ? 0.25 : 0.05)) {
+        this.said = true;
+        say(this, pick(level >= 3 ? COMPLAINTS.trunk : COMPLAINTS.road));
+      }
+    } else if (!this.said && Math.random() < 0.015) {
       const c = tracks.condition(x, y, weather);
       if (c !== "ok") {
         this.said = true;
@@ -322,7 +344,7 @@ class Skier {
     const avg = this.travelled > 0 ? this.qualitySum / this.travelled : 0;
     const variety = this.travelled > 0 ? Math.min(1, (this.visited.size / this.travelled) * 1.8) : 0;
     const longEnough = Math.min(1, this.travelled / this.goal + 0.3);
-    this.satisfaction = Math.max(0, Math.min(1, avg * (0.7 + 0.3 * variety) * longEnough * penalty));
+    this.satisfaction = Math.max(0, Math.min(1, avg * (0.7 + 0.3 * variety) * longEnough * penalty * this.roadMood));
   }
 
   animate(dt: number, visible: boolean) {

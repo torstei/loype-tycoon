@@ -18,6 +18,8 @@ export enum Flag {
   Stream = 1 << 4,
   Piste = 1 << 5,
   Building = 1 << 6,
+  /** A bridge or underpass already carries something across on its own level. */
+  Passage = 1 << 7,
 }
 
 export const TERRAIN_NAMES: Record<Terrain, string> = {
@@ -38,6 +40,7 @@ export const FLAG_NAMES: [Flag, string][] = [
   [Flag.Stream, "bekk"],
   [Flag.Piste, "eksisterende løype"],
   [Flag.Building, "bygning"],
+  [Flag.Passage, "bru/undergang"],
 ];
 
 /** Kroner per tile of new track, before slope. Null means you cannot build here. */

@@ -59,7 +59,7 @@ REGIONS = {
 FOREST, OPEN, FARMLAND, BOG, WATER, BUILT, ROCK = 0, 1, 2, 3, 4, 5, 6
 
 # Linear features sit on top of terrain as bit flags.
-ROAD, FOREST_ROAD, RAIL, PATH, STREAM, PISTE, BUILDING = (1 << i for i in range(7))
+ROAD, FOREST_ROAD, RAIL, PATH, STREAM, PISTE, BUILDING, PASSAGE = (1 << i for i in range(8))
 
 LANDCOVER_RULES = [
     (OPEN, {"landuse": {"meadow", "grass", "recreation_ground", "village_green"},
@@ -72,6 +72,13 @@ LANDCOVER_RULES = [
     (BOG, {"natural": {"wetland"}}),
     (WATER, {"natural": {"water"}, "landuse": {"reservoir", "basin"}, "waterway": {"riverbank"}}),
 ]
+
+# Bits 8–9 of the flags: how busy a road on the tile is, 0 (none) … 3 (trunk road).
+TRAFFIC_SHIFT = 8
+TRAFFIC = {
+    "motorway": 3, "trunk": 3, "primary": 3, "motorway_link": 3, "trunk_link": 3, "primary_link": 3,
+    "secondary": 2, "tertiary": 2, "secondary_link": 2, "tertiary_link": 2,
+}
 
 MAJOR_HIGHWAYS = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
                   "residential", "service", "living_street",
@@ -197,6 +204,9 @@ def build_layers(region, osm):
     areas = {cls: [] for cls, _ in LANDCOVER_RULES}
     lines = {f: [] for f in (ROAD, FOREST_ROAD, RAIL, PATH, STREAM, PISTE)}
     buildings = []
+    passages = []
+    traffic = {1: [], 2: [], 3: []}
+    road_names = []
     pois = []
 
     for el in osm["elements"]:
@@ -223,8 +233,18 @@ def build_layers(region, osm):
             continue
         line = None
         hw = tags.get("highway")
-        if hw in MAJOR_HIGHWAYS:
+        carries_traffic = hw is not None or tags.get("railway") == "rail"
+        bridge = tags.get("bridge", "no") != "no"
+        tunnel = tags.get("tunnel", "no") != "no"
+        if carries_traffic and (bridge or tunnel):
+            # Where something crosses another line on its own level, ski track can get across too.
+            passages.append(utm(way_line(el)))
+        if carries_traffic and tunnel:
+            pass
+        elif hw in MAJOR_HIGHWAYS:
             line = (ROAD, way_line(el))
+            traffic[TRAFFIC.get(hw, 1)].append(utm(line[1]))
+            road_names.append((utm(line[1]), road_label(tags), TRAFFIC.get(hw, 1)))
         elif hw == "track":
             line = (FOREST_ROAD, way_line(el))
         elif hw in {"path", "footway", "bridleway", "cycleway", "steps"}:
@@ -259,9 +279,48 @@ def build_layers(region, osm):
             mask = rasterize(geoms, out_shape=(n, n), transform=transform, fill=0,
                              default_value=1, all_touched=True)
             flags[mask == 1] |= flag
+    # Quieter roads first, so a tile shared with a busier road ends up with the busier one.
+    for level, geoms in sorted(traffic.items()):
+        geoms = [mapping(g) for g in geoms if not g.is_empty]
+        if geoms:
+            mask = rasterize(geoms, out_shape=(n, n), transform=transform, fill=0, default_value=1, all_touched=True)
+            flags[mask == 1] = (flags[mask == 1] & np.uint16(0xFFFF ^ (3 << TRAFFIC_SHIFT))) | np.uint16(level << TRAFFIC_SHIFT)
+    geoms = [mapping(g) for g in passages if not g.is_empty]
+    if geoms:
+        mask = rasterize(geoms, out_shape=(n, n), transform=transform, fill=0, default_value=1, all_touched=True)
+        flags[mask == 1] |= PASSAGE
 
     pois = [p for p in pois if p is not None]
-    return terrain, flags, pois, vector_lines(region, lines)
+    return terrain, flags, pois, vector_lines(region, lines) + named_roads(region, road_names)
+
+
+def road_label(tags):
+    name = tags.get("name")
+    ref = tags.get("ref")
+    kind = "Rv." if tags.get("highway", "").startswith(("trunk", "primary", "motorway")) else "Fv."
+    if name and ref:
+        return f"{name} ({kind} {ref})"
+    return name or (f"{kind} {ref}" if ref else None)
+
+
+def named_roads(region, road_names):
+    """Road centre lines with name and traffic, so the game can say which road a track crosses."""
+    top = region.min_y + region.size_m
+    out = []
+    for g, label, traffic in road_names:
+        if g.is_empty:
+            continue
+        for part in getattr(g, "geoms", [g]):
+            if part.geom_type != "LineString":
+                continue
+            pts = [[round((x - region.min_x) / region.tile_m, 2), round((top - y) / region.tile_m, 2)]
+                   for x, y in part.simplify(region.tile_m * 0.25).coords]
+            if len(pts) >= 2:
+                entry = {"kind": "road_name", "traffic": traffic, "pts": pts}
+                if label:
+                    entry["name"] = label
+                out.append(entry)
+    return out
 
 
 LINE_KINDS = {ROAD: "road", FOREST_ROAD: "forest_road", RAIL: "rail", PATH: "path",

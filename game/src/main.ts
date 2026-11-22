@@ -9,8 +9,9 @@ import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
 import { PX, renderLandscape } from "./render";
-import { FLAG_NAMES, TERRAIN_NAMES } from "./terrain";
-import { Condition, CONDITION_NAMES, lineTiles, TrackNetwork } from "./tracks";
+import { Flag, FLAG_NAMES, TERRAIN_NAMES } from "./terrain";
+import { askCrossing } from "./crossing";
+import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, roadTraffic, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
 import { Precipitation, Whimsy } from "./whimsy";
 import "./style.css";
@@ -52,6 +53,8 @@ async function main() {
   weather.advance(0, clock.hours);
   const fleet = new Fleet(map);
   let dieselToday = 0;
+  let incidentsToday: string[] = [];
+  let incidentsYesterday: string[] = [];
   const crowd = new Crowd(map, (amount) => {
     budget += amount;
   });
@@ -108,11 +111,16 @@ async function main() {
       dieselToday += amount;
       return true;
     },
+    notify: (text: string) => {
+      incidentsToday.push(text);
+      crowd.reputation = Math.max(0.05, crowd.reputation - 0.02);
+      showToast(text);
+    },
   };
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, reports: () => reports } });
+    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, reports: () => reports } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -257,6 +265,8 @@ async function main() {
 
   const closeDay = (day: number) => {
     yesterdayHyped = crowd.hype;
+    incidentsYesterday = incidentsToday;
+    incidentsToday = [];
     const stats = crowd.endDay();
     yesterday = stats;
     const happy = stats.finished > 0 ? Math.round((stats.satisfaction / stats.finished) * 100) : 0;
@@ -339,6 +349,7 @@ async function main() {
       rainSinceLast: rainSinceReport,
       yesterday,
       yesterdayHyped,
+      incidents: incidentsYesterday,
     });
     snowSinceReport = 0;
     rainSinceReport = 0;
@@ -403,6 +414,87 @@ async function main() {
         trackLayer.fill(color);
       }
     }
+    for (const [x, y] of tracks.each()) {
+      const crossing = tracks.crossing[map.index(x, y)] as Crossing;
+      if (crossing !== Crossing.None) {
+        drawCrossing(x, y, crossing);
+      }
+    }
+  };
+
+  /** Along-track and across-track unit vectors at a tile, from the track tiles either side of it. */
+  const trackAxes = (x: number, y: number) => {
+    const n = tracks.neighbours(x, y);
+    let [ax, ay] = n.length >= 2 ? [n[1][0] - n[0][0], n[1][1] - n[0][1]] : n.length === 1 ? [n[0][0] - x, n[0][1] - y] : [1, 0];
+    if (ax === 0 && ay === 0) {
+      [ax, ay] = [1, 0];
+    }
+    const len = Math.hypot(ax, ay);
+    return { ux: ax / len, uy: ay / len, vx: -ay / len, vy: ax / len };
+  };
+
+  const drawCrossing = (x: number, y: number, crossing: Crossing) => {
+    const cx = (x + 0.5) * PX;
+    const cy = (y + 0.5) * PX;
+    const { ux, uy, vx, vy } = trackAxes(x, y);
+    /** A rectangle centred on the tile, `along` long in the track direction and `across` wide. */
+    const quad = (along: number, across: number, offset = 0) => {
+      const ox = cx + vx * offset;
+      const oy = cy + vy * offset;
+      const pts = [[-along, -across], [along, -across], [along, across], [-along, across]].flatMap(([a, b]) => [
+        ox + ux * (a / 2) + vx * (b / 2),
+        oy + uy * (a / 2) + vy * (b / 2),
+      ]);
+      return trackLayer.poly(pts);
+    };
+    const bar = (alongAt: number, across: number, width: number, colour: number) => {
+      trackLayer
+        .moveTo(cx + ux * alongAt - vx * across / 2, cy + uy * alongAt - vy * across / 2)
+        .lineTo(cx + ux * alongAt + vx * across / 2, cy + uy * alongAt + vy * across / 2)
+        .stroke({ width, color: colour, cap: "round" });
+    };
+    const rail = tracks.obstacle(x, y) === "rail" || map.has(x, y, Flag.Rail);
+    const same = (dir: number) => {
+      const nx = x + Math.round(ux * dir);
+      const ny = y + Math.round(uy * dir);
+      return tracks.has(nx, ny) && tracks.crossing[map.index(nx, ny)] === crossing;
+    };
+    if (crossing === Crossing.AtGrade) {
+      // Bare asphalt with a zebra crossing: the skis come off here.
+      quad(PX * 1.05, 12).fill(0x8e939d);
+      for (const offset of [-4, 0, 4]) {
+        quad(PX * 0.9, 2.2, offset).fill(0xffffff);
+      }
+    } else if (crossing === Crossing.Bridge) {
+      for (const side of [-1, 1]) {
+        trackLayer
+          .moveTo(cx - ux * PX * 0.6 + vx * side * 7, cy - uy * PX * 0.6 + vy * side * 7)
+          .lineTo(cx + ux * PX * 0.6 + vx * side * 7, cy + uy * PX * 0.6 + vy * side * 7)
+          .stroke({ width: 1.6, color: 0x6b4a2f, cap: "round" });
+        for (const t of [-0.5, 0, 0.5]) {
+          trackLayer.circle(cx + ux * PX * t + vx * side * 7, cy + uy * PX * t + vy * side * 7, 1.1).fill(0x4a3220);
+        }
+      }
+    } else {
+      // Track goes under: the road or railway is drawn across it, with dark tunnel mouths.
+      const slab = rail ? 0x6b6760 : 0x8e939d;
+      // Neighbouring crossing tiles join up into one deck, with tunnel mouths only at its ends.
+      quad(PX + 1, PX * 1.4).fill(slab);
+      if (rail) {
+        for (const off of [-1.8, 1.8]) {
+          trackLayer
+            .moveTo(cx + ux * off - vx * PX * 0.7, cy + uy * off - vy * PX * 0.7)
+            .lineTo(cx + ux * off + vx * PX * 0.7, cy + uy * off + vy * PX * 0.7)
+            .stroke({ width: 1, color: 0x2c2c33 });
+        }
+      }
+      if (!same(-1)) {
+        bar(-PX / 2, 11, 2.6, 0x1d2228);
+      }
+      if (!same(1)) {
+        bar(PX / 2, 11, 2.6, 0x1d2228);
+      }
+    }
   };
 
   const tileAt = (sx: number, sy: number): [number, number] => {
@@ -420,11 +512,21 @@ async function main() {
     const poi = map.pois.find((p) => Math.abs(p.x - x) <= 2 && Math.abs(p.y - y) <= 2 && p.name);
     const elevation = map.elevationAt(x, y);
     const i = map.index(x, y);
-    let action = cost === null ? "Kan ikke bygge her" : `Bygge løype: ${kr(cost)}`;
+    const obstacle = tracks.obstacle(x, y);
+    let action = cost === null
+      ? "Kan ikke bygge her"
+      : obstacle === "rail"
+        ? `Jernbane: krever undergang (fra ${kr(cost + 120_000)})`
+        : obstacle === "road"
+          ? `${map.roadName(x, y) ?? "Vei"}: kryssing fra ${kr(cost + roadTraffic(tracks.traffic(x, y)).levelPrice)}`
+          : map.has(x, y, Flag.Passage) && (map.has(x, y, Flag.Rail) || map.has(x, y, Flag.Road))
+            ? `Eksisterende bru/undergang: ${kr(cost)}`
+            : `Bygge løype: ${kr(cost)}`;
     if (tracks.has(x, y)) {
       const since = clock.hours - tracks.groomedAt[i];
       const groomed = Number.isFinite(since) ? `preppet for ${since < 1 ? "under en time" : `${Math.floor(since)} t`} siden` : "aldri preppet";
-      action = `<strong>Løype: ${CONDITION_NAMES[tracks.condition(x, y, weather)]}</strong>
+      const crossing = tracks.crossing[i] as Crossing;
+      action = `${crossing !== Crossing.None ? `🌉 ${CROSSING_NAMES[crossing]}<br>` : ""}<strong>Løype: ${CONDITION_NAMES[tracks.condition(x, y, weather)]}</strong>
         (${Math.round(tracks.quality(x, y, weather) * 100)} %)<br>
         nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}`;
     } else if (tool === "garage") {
@@ -445,16 +547,88 @@ async function main() {
     cursor.clear().rect(x * PX, y * PX, PX, PX).stroke({ width: 2, color: cost === null ? 0xc0392b : 0x1f5fd1 });
   };
 
+  /**
+   * How the current stroke gets across the road or railway it is on. Chosen once in the crossing
+   * dialog and reused for the rest of that road or railway, so a two-tile-wide road asks once.
+   */
+  let strokeCrossing: { obstacle: Obstacle; option: CrossingOption; traffic: number } | null = null;
+  let asking = false;
+
+  type BuildResult = { status: "built" | "exists" | "blocked" | "asked"; paid: number; reason?: string };
+
+  /** Build one track tile, asking how to cross first if it lies on a road or the railway. */
+  const build = (x: number, y: number, afterAsk: () => void): BuildResult => {
+    if (tracks.has(x, y)) {
+      return { status: "exists", paid: 0 };
+    }
+    const ground = tracks.cost(x, y);
+    if (ground === null) {
+      return { status: "blocked", paid: 0, reason: "Kan ikke bygge her" };
+    }
+    const obstacle = tracks.obstacle(x, y);
+    if (!obstacle) {
+      strokeCrossing = null;
+      if (ground > budget) {
+        return { status: "blocked", paid: 0, reason: `Ikke råd: ${kr(ground)}` };
+      }
+      budget -= ground;
+      tracks.add(x, y);
+      return { status: "built", paid: ground };
+    }
+    // A busier road met further along the same crossing gets its own question.
+    if (strokeCrossing?.obstacle === obstacle && tracks.traffic(x, y) <= strokeCrossing.traffic) {
+      const price = ground + strokeCrossing.option.price;
+      if (price > budget) {
+        return { status: "blocked", paid: 0, reason: `Ikke råd: ${kr(price)}` };
+      }
+      budget -= price;
+      tracks.add(x, y, strokeCrossing.option.type);
+      return { status: "built", paid: price };
+    }
+    if (asking) {
+      return { status: "asked", paid: 0 };
+    }
+    asking = true;
+    const wasPaused = clock.paused;
+    clock.paused = true;
+    const road = obstacle === "road" ? map.roadName(x, y) : null;
+    const traffic = tracks.traffic(x, y);
+    askCrossing(
+      {
+        title: obstacle === "rail" ? "Løypa krysser Gjøvikbanen" : `Løypa krysser ${road ?? "en vei"}`,
+        lead: obstacle === "rail" ? "Å gå over skinnene er ikke lov. Ikke engang i Hakadal." : roadTraffic(traffic).describe,
+        options: crossingOptions(obstacle, traffic),
+      },
+      ground,
+      budget,
+      (option) => {
+        asking = false;
+        clock.paused = wasPaused;
+        strokeCrossing = { obstacle, option, traffic };
+        build(x, y, afterAsk);
+        afterAsk();
+        redrawTracks();
+        refreshHud();
+      },
+      () => {
+        asking = false;
+        clock.paused = wasPaused;
+        refreshHud();
+      },
+    );
+    return { status: "asked", paid: 0 };
+  };
+
   /** Returns what a newly built tile cost, so a corner cut later in the same drag can refund it. */
   const applyTool = (x: number, y: number): number => {
-    if (tool === "build" && !tracks.has(x, y)) {
-      const cost = tracks.cost(x, y);
-      if (cost !== null && cost <= budget) {
-        budget -= cost;
-        tracks.add(x, y);
-        return cost;
+    if (tool === "build") {
+      const result = build(x, y, () => {});
+      if (result.status === "asked") {
+        painting = null;
       }
-    } else if (tool === "remove" && tracks.has(x, y)) {
+      return result.paid;
+    }
+    if (tool === "remove" && tracks.has(x, y)) {
       tracks.remove(x, y);
     }
     return 0;
@@ -467,7 +641,9 @@ async function main() {
     const paid = applyTool(x, y);
     const [before, last] = stroke.slice(-2);
     const diagonalToBefore = before && Math.abs(before.x - x) === 1 && Math.abs(before.y - y) === 1;
-    if (tool === "build" && diagonalToBefore && last.paid > 0) {
+    // Never cut a corner through a crossing: that money bought a bridge, not a staircase step.
+    const lastIsPlain = last && tracks.crossing[map.index(last.x, last.y)] === Crossing.None;
+    if (tool === "build" && diagonalToBefore && last.paid > 0 && lastIsPlain) {
       tracks.remove(last.x, last.y);
       budget += last.paid;
       stroke.pop();
@@ -500,6 +676,7 @@ async function main() {
     if (e.button === 0 && tool !== "look") {
       painting = tileAt(e.offsetX, e.offsetY);
       stroke = [];
+      strokeCrossing = null;
       paintStep(...painting);
       redrawTracks();
       refreshHud();
@@ -520,8 +697,13 @@ async function main() {
     } else if (painting && (painting[0] !== x || painting[1] !== y)) {
       for (const [lx, ly] of [...lineTiles(painting[0], painting[1], x, y)].slice(1)) {
         paintStep(lx, ly);
+        if (!painting) {
+          break;
+        }
       }
-      painting = [x, y];
+      if (painting) {
+        painting = [x, y];
+      }
       redrawTracks();
       refreshHud();
     }
@@ -558,47 +740,44 @@ async function main() {
     camera.pan(dx, dy);
   };
 
-  const buildAt = (x: number, y: number): string | null => {
-    if (tracks.has(x, y)) {
-      return null;
-    }
-    const cost = tracks.cost(x, y);
-    if (cost === null) {
-      return "Kan ikke bygge her";
-    }
-    if (cost > budget) {
-      return `Ikke råd: ${kr(cost)}`;
-    }
-    budget -= cost;
-    tracks.add(x, y);
-    return null;
-  };
-
   const stepCrew = (dx: number, dy: number) => {
     const nx = crew.x + dx;
     const ny = crew.y + dy;
-    if (!map.inside(nx, ny)) {
+    if (!map.inside(nx, ny) || asking) {
       crew.refuse();
       return;
     }
+    const arrive = () => {
+      crew.x = nx;
+      crew.y = ny;
+      describe(nx, ny);
+      followCrew();
+    };
     if (crew.building) {
-      const here = tracks.cost(crew.x, crew.y) !== null ? buildAt(crew.x, crew.y) : null;
-      const problem = here ?? buildAt(nx, ny);
-      redrawTracks();
-      refreshHud();
-      if (problem) {
-        crew.refuse();
-        describe(nx, ny);
-        if (tracks.cost(nx, ny) !== null) {
-          info.innerHTML += `<br><strong class="warn">${problem}</strong>`;
+      const tiles: [number, number][] = tracks.cost(crew.x, crew.y) !== null ? [[crew.x, crew.y], [nx, ny]] : [[nx, ny]];
+      for (const [tx, ty] of tiles) {
+        const isNext = tx === nx && ty === ny;
+        const result = build(tx, ty, () => {
+          if (isNext) {
+            arrive();
+          }
+        });
+        redrawTracks();
+        refreshHud();
+        if (result.status === "asked") {
+          return;
         }
-        return;
+        if (result.status === "blocked") {
+          crew.refuse();
+          describe(nx, ny);
+          if (tracks.cost(nx, ny) !== null) {
+            info.innerHTML += `<br><strong class="warn">${result.reason}</strong>`;
+          }
+          return;
+        }
       }
     }
-    crew.x = nx;
-    crew.y = ny;
-    describe(nx, ny);
-    followCrew();
+    arrive();
   };
 
   const toggleBuilding = () => {

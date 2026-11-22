@@ -1,7 +1,7 @@
 import { Container, Graphics, Text } from "pixi.js";
 import { GameMap } from "./map";
 import { PX } from "./render";
-import { TrackNetwork } from "./tracks";
+import { Crossing, roadTraffic, TrackNetwork } from "./tracks";
 import { Weather } from "./weather";
 
 /** Tiles per game hour: 10 km/h, about what a real snowcat manages. */
@@ -21,6 +21,8 @@ type State = "home" | "grooming" | "returning";
 
 export interface Ledger {
   spend(amount: number): boolean;
+  /** Something happened out there that people will talk about. */
+  notify(text: string): void;
 }
 
 function inWindow(schedule: Schedule, hourOfDay: number): boolean {
@@ -169,6 +171,9 @@ export class Groomer {
   private heading = 0;
   private path: [number, number][] = [];
   private shift = 0;
+  /** Game hours left waiting for a gap in the traffic. */
+  private waiting = 0;
+  private onRoad = false;
   groomedTonight = 0;
   totalGroomed = 0;
 
@@ -195,6 +200,12 @@ export class Groomer {
     this.shift += hours;
     let budget = hours * SPEED;
     while (budget > 0 && this.path.length > 0) {
+      if (this.waiting > 0) {
+        const w = Math.min(this.waiting, budget / SPEED);
+        this.waiting -= w;
+        budget -= w * SPEED;
+        continue;
+      }
       const [tx, ty] = this.path[0];
       if (!tracks.has(tx, ty) && this.state === "grooming") {
         this.path = [];
@@ -211,6 +222,11 @@ export class Groomer {
         this.py = cy;
         budget -= dist;
         this.path.shift();
+        const atGrade = tracks.has(tx, ty) && tracks.crossing[tracks.index(tx, ty)] === Crossing.AtGrade;
+        if (atGrade && !this.onRoad) {
+          this.crossRoad(tx, ty, tracks, ledger);
+        }
+        this.onRoad = atGrade;
         if (this.state === "grooming" && tracks.has(tx, ty) && tracks.needsGrooming(tx, ty, weather, now)) {
           if (!ledger.spend(COST_PER_TILE)) {
             this.status = "Tom for dieselpenger, kjører hjem";
@@ -242,6 +258,22 @@ export class Groomer {
     } else {
       this.status = outOfTime ? "Skiftet er over, kjører hjem" : "Ferdig, kjører hjem";
       this.headHome(tracks);
+    }
+  }
+
+  private crossRoad(x: number, y: number, tracks: TrackNetwork, ledger: Ledger) {
+    const atGrade = ([nx, ny]: [number, number]) => tracks.crossing[tracks.index(nx, ny)] === Crossing.AtGrade;
+    const level = Math.max(tracks.traffic(x, y), ...tracks.neighbours(x, y).filter(atGrade).map(([nx, ny]) => tracks.traffic(nx, ny)));
+    const traffic = roadTraffic(level);
+    this.waiting = Math.random() * traffic.groomerWait;
+    if (this.waiting > 0.1) {
+      this.status = "Venter på en luke i trafikken";
+    }
+    if (Math.random() < traffic.incident) {
+      const road = tracks.roadName(x, y) ?? "riksveien";
+      ledger.notify(
+        `🚜 ${this.name} sperret ${road} i ${2 + Math.floor(Math.random() * 9)} minutter. Vogntogsjåførene var ikke imponert.`,
+      );
     }
   }
 
