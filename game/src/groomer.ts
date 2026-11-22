@@ -10,8 +10,9 @@ const COST_PER_TILE = 10;
 const MAX_SHIFT_HOURS = 10;
 const MIN_JOB_TILES = 4;
 
-export const GARAGE_COST = 20_000;
 export const GARAGE_WITH_MACHINE_COST = 80_000;
+/** How close, in tiles, track must come for a garage's machine to drive onto it. */
+export const GARAGE_REACH = 2;
 
 const NAMES = ["Gamle Gunnar", "Snøfrid", "Tråkk-Trine", "Diesel-Dagfinn", "Kari Kjetting", "Preppe-Per"];
 
@@ -148,8 +149,8 @@ export class Garage {
   entry(tracks: TrackNetwork): [number, number] | null {
     let best: [number, number] | null = null;
     let bestD = Infinity;
-    for (let dy = -2; dy <= 2; dy++) {
-      for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = -GARAGE_REACH; dy <= GARAGE_REACH; dy++) {
+      for (let dx = -GARAGE_REACH; dx <= GARAGE_REACH; dx++) {
         const d = Math.hypot(dx, dy);
         if (tracks.has(this.x + dx, this.y + dy) && d < bestD) {
           best = [this.x + dx, this.y + dy];
@@ -404,7 +405,8 @@ export class Fleet {
   constructor(private readonly map: GameMap) {}
 
   get nextGarageCost(): number {
-    return this.garages.length === 0 ? GARAGE_COST : GARAGE_WITH_MACHINE_COST;
+    // The club already owns Gamle Gunnar; it only needs somewhere to keep him.
+    return this.garages.length === 0 ? 0 : GARAGE_WITH_MACHINE_COST;
   }
 
   canPlace(x: number, y: number, tracks: TrackNetwork): boolean {

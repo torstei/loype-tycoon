@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, GameClock, SPEEDS } from "./clock";
-import { Fleet } from "./groomer";
+import { Fleet, GARAGE_REACH } from "./groomer";
 import { Report, writeReport } from "./report";
 import { Skijorer } from "./skijor";
 import { Crowd, DayStats } from "./skiers";
@@ -58,6 +58,7 @@ async function main() {
   const map = await GameMap.load("hakadal");
   const tracks = new TrackNetwork(map);
   const clock = new GameClock();
+  clock.paused = true;
   const weather = new Weather();
   weather.advance(0, clock.hours);
   const fleet = new Fleet(map);
@@ -68,7 +69,8 @@ async function main() {
     budget += amount;
   });
   let budget = START_BUDGET;
-  let tool: Tool = "build";
+  // The game opens by choosing where the club keeps its garage.
+  let tool: Tool = "garage";
 
   const app = new Application();
   await app.init({ resizeTo: window, background: "#c9d8ea", antialias: true });
@@ -236,7 +238,7 @@ async function main() {
       btn.classList.toggle("active", i < 0 ? clock.paused : !clock.paused && clock.speedIndex === i);
     }
     const garageTool = document.querySelector<HTMLButtonElement>('[data-tool="garage"]')!;
-    garageTool.title = `4 · ${kr(fleet.nextGarageCost)}`;
+    garageTool.title = `4 · ${fleet.nextGarageCost === 0 ? "gratis" : kr(fleet.nextGarageCost)}`;
     fleetPanel.hidden = fleet.groomers.length === 0;
     fleetPanel.innerHTML = `
       <div class="head"><strong>Løypemaskiner</strong>
@@ -378,14 +380,24 @@ async function main() {
   const refreshTrailheads = () => {
     crowd.connect(tracks);
     const connected = crowd.trailheads.filter((h) => h.entry);
+    const choosingHome = fleet.garages.length === 0;
     const starting = tracks.size === 0;
-    const signature = starting ? "start" : connected.map((h) => `${h.x},${h.y}`).join(";");
+    const signature = choosingHome ? "home" : starting ? "start" : connected.map((h) => `${h.x},${h.y}`).join(";");
     if (signature === trailheadSignature) {
       return;
     }
     trailheadSignature = signature;
     trailheadLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
-    if (starting) {
+    if (!choosingHome && starting) {
+      const garage = fleet.garages[0];
+      const g = new Graphics()
+        .circle((garage.x + 0.5) * PX, (garage.y + 0.5) * PX, (GARAGE_REACH + 0.5) * PX)
+        .fill({ color: 0x1f5fd1, alpha: 0.1 })
+        .stroke({ width: 2, color: 0x1f5fd1, alpha: 0.7 });
+      trailheadLayer.addChild(g);
+      return;
+    }
+    if (choosingHome) {
       for (const h of crowd.trailheads) {
         const g = new Graphics()
           .circle((h.x + 0.5) * PX, (h.y + 0.5) * PX, h.reach * PX)
@@ -606,7 +618,8 @@ async function main() {
         nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}<br>
         ≈ ${Math.round(tracks.usage[i])} skiløpere siste døgnet`;
     } else if (tool === "garage") {
-      action = fleet.canPlace(x, y, tracks) ? `Garasje: ${kr(fleet.nextGarageCost)}` : "Kan ikke sette garasje her";
+      const problem = garageProblem(x, y);
+      action = problem ? `<span class="minus">${problem}</span>` : `Garasje her: ${fleet.nextGarageCost === 0 ? "gratis" : kr(fleet.nextGarageCost)}`;
     }
     const head = crowd.trailheads.find((h) => Math.abs(h.x - x) <= 1 && Math.abs(h.y - y) <= 1);
     const headLine = head
@@ -638,10 +651,49 @@ async function main() {
    * As in the old tycoon games, new track must grow out of the network; the very first track
    * starts where skiers can reach it. Null when building here is allowed.
    */
+  /** Why a garage cannot go here, or null if it can. */
+  const garageProblem = (x: number, y: number): string | null => {
+    if (!fleet.canPlace(x, y, tracks)) {
+      return "Kan ikke sette garasje her";
+    }
+    if (fleet.garages.length === 0 && !crowd.trailheads.some((h) => Math.hypot(h.x - x, h.y - y) <= h.reach + GARAGE_REACH)) {
+      return "Garasjen må stå nær en stasjon, parkering eller et boligfelt";
+    }
+    if (budget < fleet.nextGarageCost) {
+      return `Ikke råd: ${kr(fleet.nextGarageCost)}`;
+    }
+    return null;
+  };
+
+  const placeGarage = (x: number, y: number) => {
+    if (garageProblem(x, y)) {
+      crew.refuse();
+      refreshHud();
+      return;
+    }
+    const first = fleet.garages.length === 0;
+    budget -= fleet.nextGarageCost;
+    fleet.place(x, y);
+    document.getElementById("setup")!.hidden = true;
+    if (first) {
+      crew.x = x;
+      crew.y = y;
+      setTool("build");
+      showToast("🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S. Mellomrom starter tiden.");
+    } else {
+      setTool("look");
+    }
+    redrawTracks();
+    refreshHud();
+  };
+
   const connectionProblem = (x: number, y: number): string | null => {
+    if (fleet.garages.length === 0) {
+      return "Velg først hvor løypelaget skal ha garasjen";
+    }
     if (tracks.size === 0) {
-      const nearHead = crowd.trailheads.some((h) => Math.hypot(h.x - x, h.y - y) <= h.reach);
-      return nearHead ? null : "Første løype må starte ved en stasjon, parkering eller et boligfelt";
+      const nearGarage = fleet.garages.some((g) => Math.max(Math.abs(g.x - x), Math.abs(g.y - y)) <= GARAGE_REACH);
+      return nearGarage ? null : "Første løype må starte ved garasjen";
     }
     return tracks.neighbours(x, y).length > 0 ? null : "Ny løype må bygges videre fra løypenettet";
   };
@@ -755,15 +807,7 @@ async function main() {
       [crew.x, crew.y] = tileAt(e.offsetX, e.offsetY);
     }
     if (e.button === 0 && tool === "garage") {
-      const [gx, gy] = tileAt(e.offsetX, e.offsetY);
-      if (fleet.canPlace(gx, gy, tracks) && budget >= fleet.nextGarageCost) {
-        budget -= fleet.nextGarageCost;
-        fleet.place(gx, gy);
-        setTool("look");
-      } else {
-        crew.refuse();
-      }
-      refreshHud();
+      placeGarage(...tileAt(e.offsetX, e.offsetY));
       return;
     }
     if (e.button === 0 && tool !== "look") {
@@ -898,6 +942,13 @@ async function main() {
     snowButton.classList.toggle("active", precipitation.enabled);
   };
   const setSpeed = (i: number) => {
+    if (fleet.garages.length === 0) {
+      const banner = document.getElementById("setup")!;
+      banner.classList.remove("nudge");
+      void banner.offsetWidth;
+      banner.classList.add("nudge");
+      return;
+    }
     if (i < 0) {
       clock.paused = !clock.paused;
     } else {
@@ -954,6 +1005,8 @@ async function main() {
       toggleSnow();
     } else if (e.code === "KeyG") {
       toggleGroomMap();
+    } else if ((e.code === "Enter" || e.code === "NumpadEnter") && tool === "garage") {
+      placeGarage(crew.x, crew.y);
     } else if (e.code === "KeyF") {
       showReport(reportPanel.hidden);
     } else if (e.code === "KeyH" || e.key === "?") {

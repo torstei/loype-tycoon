@@ -22,9 +22,12 @@ npm run dev
 
 Controls (press `H` in the game for the full list):
 
-- **Track grows from the network**, as in the old tycoon games: the first track has to start
-  within reach of a station, car park or residential area (shown on the map before you
-  build), and every new piece after that has to connect to track you already have. Track can
+- **Where it all starts**: the game opens by choosing where the club keeps its garage —
+  anywhere near a station, car park or residential area (shown as green rings). The first
+  garage is free, since the club already owns Gamle Gunnar; time starts once it is placed.
+  Keyboard players can walk the crew there and press Enter.
+- **Track grows from the network**, as in the old tycoon games: the first track starts at the
+  garage, and every new piece after that has to connect to track you already have. Track can
   be removed anywhere, which saves grooming diesel on stretches nobody uses.
 - **Keyboard track laying**, as in the old tycoon games: Num Lock or `T` toggles
   tråkkemodus; numpad 1–9, or Q W E / A D / Z X C on keyboards without a numpad, walk the
@@ -41,8 +44,8 @@ Controls (press `H` in the game for the full list):
   skiers queue for a gap, the snowcat waits too and now and then holds up the trucks, and
   culverts and bridges there cost about twice as much. The railway cannot be crossed on the level: use an existing bridge or underpass
   (taken from the OSM data, shown as "bru/undergang" on hover) or pay for a new underpass.
-- **Grooming**: tool `4` places a garage next to the track; the first comes with the
-  club's old snowcat. Machines go out when tracks need it (by default only at night),
+- **Grooming**: tool `4` places another garage next to the track, with a new machine
+  (80 000 kr). Machines go out when tracks need it (by default only at night),
   groom their way round the network and drive home. Diesel is paid per tile groomed.
 - **Grooming map**: `G` (or 🕑 Sist preppet) colours every stretch by how long since a
   snowcat was last along it — under 6 hours, 6–24 hours, 1–3 days, over 3 days, never.
