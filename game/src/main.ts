@@ -18,6 +18,15 @@ import "./style.css";
 
 type Tool = "look" | "build" | "remove" | "garage";
 
+/** Hours since grooming, upper bound of each band, and its colour on the grooming map. */
+const GROOM_AGE: [number, number, string][] = [
+  [6, 0x1f9d55, "under 6 timer"],
+  [24, 0x9ccc3c, "6–24 timer"],
+  [72, 0xf0a020, "1–3 døgn"],
+  [Infinity, 0xd64534, "over 3 døgn"],
+];
+const NEVER_GROOMED = 0x8a96a8;
+
 /** Outline, groomed band, grooves, gap between the grooves. */
 const TRACK_STYLE: Record<Condition, [number, number, number, number]> = {
   fresh: [0x1b3f7a, 0xf4f8ff, 0x2f6fe0, 0xf4f8ff],
@@ -408,10 +417,39 @@ async function main() {
     }
   };
 
+  let groomMap = false;
+
+  /** The grooming map: each stretch coloured by how long since a snowcat was last along it. */
+  const drawGroomAges = (lines: [number, number, number, number][], dots: [number, number][]) => {
+    const colourAt = (x: number, y: number) => {
+      const age = clock.hours - tracks.groomedAt[map.index(Math.floor(x), Math.floor(y))];
+      return Number.isFinite(age) ? GROOM_AGE.find(([limit]) => age < limit)![1] : NEVER_GROOMED;
+    };
+    const colours = [...GROOM_AGE.map(([, c]) => c), NEVER_GROOMED];
+    for (const colour of colours) {
+      const segs = lines.filter(([x0, y0]) => colourAt(x0, y0) === colour);
+      const pts = dots.filter(([x, y]) => colourAt(x, y) === colour);
+      for (const [width, c] of [[12, 0x23323d], [9, colour]] as const) {
+        for (const [x0, y0, x1, y1] of segs) {
+          trackLayer.moveTo(x0 * PX, y0 * PX).lineTo(x1 * PX, y1 * PX);
+        }
+        trackLayer.stroke({ width, color: c, cap: "round", join: "round" });
+        for (const [x, y] of pts) {
+          trackLayer.circle(x * PX, y * PX, width / 2);
+        }
+        trackLayer.fill(c);
+      }
+    }
+  };
+
   const redrawTracks = () => {
     refreshTrailheads();
     trackLayer.clear();
     const { lines, dots } = tracks.segments();
+    if (groomMap) {
+      drawGroomAges(lines, dots);
+      return;
+    }
     const at = (x: number, y: number) => tracks.condition(Math.floor(x), Math.floor(y), weather);
     for (const condition of Object.keys(TRACK_STYLE) as Condition[]) {
       const segs = lines.filter(([x0, y0]) => at(x0, y0) === condition);
@@ -873,6 +911,18 @@ async function main() {
   }
   snowButton.classList.add("active");
   snowButton.addEventListener("click", toggleSnow);
+  const groomButton = document.getElementById("groom-map")!;
+  const legend = document.getElementById("legend")!;
+  legend.innerHTML = `<strong>Sist preppet</strong>${[...GROOM_AGE.map(([, c, label]) => [c, label] as const), [NEVER_GROOMED, "aldri"] as const]
+    .map(([c, label]) => `<div><span class="swatch" style="background:#${c.toString(16).padStart(6, "0")}"></span>${label}</div>`)
+    .join("")}`;
+  const toggleGroomMap = () => {
+    groomMap = !groomMap;
+    groomButton.classList.toggle("active", groomMap);
+    legend.hidden = !groomMap;
+    redrawTracks();
+  };
+  groomButton.addEventListener("click", toggleGroomMap);
   const help = document.getElementById("help")!;
   window.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) {
@@ -902,6 +952,8 @@ async function main() {
       setSpeed(clock.speedIndex - 1);
     } else if (e.code === "KeyN") {
       toggleSnow();
+    } else if (e.code === "KeyG") {
+      toggleGroomMap();
     } else if (e.code === "KeyF") {
       showReport(reportPanel.hidden);
     } else if (e.code === "KeyH" || e.key === "?") {

@@ -44,6 +44,8 @@ Controls (press `H` in the game for the full list):
 - **Grooming**: tool `4` places a garage next to the track; the first comes with the
   club's old snowcat. Machines go out when tracks need it (by default only at night),
   groom their way round the network and drive home. Diesel is paid per tile groomed.
+- **Grooming map**: `G` (or 🕑 Sist preppet) colours every stretch by how long since a
+  snowcat was last along it — under 6 hours, 6–24 hours, 1–3 days, over 3 days, never.
 - `+`/`-` or PageUp/PageDown zoom (the outermost two levels show the overview map); arrow
   keys pan; `1`–`4` pick the mouse tool; `N` hides or shows precipitation. Click a moose.
 

@@ -92,3 +92,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #crossing .price { font-weight: 700; white-space: nowrap; }
 #crossing .price.short { color: #c0392b; }
 #crossing .cancel { border-style: dashed; }
+#legend { position: fixed; left: 12px; bottom: 150px; padding: 8px 12px; background: rgba(255, 255, 255, 0.94);
+  border-radius: 8px; box-shadow: 0 3px 12px rgba(30, 50, 90, 0.18); font-size: 13px; line-height: 1.6; }
+#legend[hidden] { display: none; }
+#legend .swatch { display: inline-block; width: 22px; height: 8px; border-radius: 4px; margin-right: 8px;
+  vertical-align: 1px; border: 1.5px solid #23323d; }
