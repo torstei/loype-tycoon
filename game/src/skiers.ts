@@ -56,59 +56,132 @@ function pick<T>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];
 }
 
-/** A little cross-country skier in diagonal stride. Faces right. */
-class SkierSprite {
-  readonly root = new Container();
-  private readonly figure = new Container();
-  private readonly legs: Graphics[];
-  private readonly skis: Graphics[];
-  private readonly poles: Graphics[];
-  private readonly arms: Graphics[];
+const PANTS = 0x23323d;
+const SKIN = 0xf2c9a0;
 
-  constructor(jacket: number, hat: number, scale: number) {
-    const pants = 0x23323d;
-    const shadow = new Graphics().ellipse(0, 0.5, 5, 1.2).fill({ color: 0x3c548c, alpha: 0.22 });
-    this.skis = [0, 1].map(() => new Graphics().roundRect(-4.5, -0.6, 9, 1.1, 0.5).fill(0x3b2a20));
-    this.poles = [0, 1].map(() => new Graphics().moveTo(0, 0).lineTo(0, 8).stroke({ width: 0.6, color: 0x55606b }));
-    this.legs = [0, 1].map(() => new Graphics().moveTo(0, 0).lineTo(0, 5).stroke({ width: 1.5, color: pants, cap: "round" }));
-    this.arms = [0, 1].map(() => new Graphics().moveTo(0, 0).lineTo(0, 3.2).stroke({ width: 1.2, color: jacket, cap: "round" }));
-    const torso = new Graphics().roundRect(-1.4, -4.2, 2.8, 4.6, 1.2).fill(jacket).stroke({ width: 0.6, color: 0x1d1d22 });
-    const head = new Graphics()
-      .circle(0.6, -5.8, 1.5)
-      .fill(0xf2c9a0)
-      .stroke({ width: 0.5, color: 0x5a3c25 })
-      .poly([-1, -6.2, 0.6, -8.2, 2.2, -6.2])
-      .fill(hat)
-      .circle(0.6, -8.4, 0.7)
-      .fill(0xffffff);
+function stick(length: number, width: number, colour: number): Graphics {
+  return new Graphics().moveTo(0, 0).lineTo(0, length).stroke({ width, color: colour, cap: "round" });
+}
+
+/** Side view, facing right, feet at the origin. */
+class SideFigure {
+  readonly root = new Container();
+  private readonly legs = [0, 1].map(() => stick(5, 1.5, PANTS));
+  private readonly arms: Graphics[];
+  private readonly poles = [0, 1].map(() => stick(8, 0.6, 0x55606b));
+
+  constructor(jacket: number, hat: number) {
+    this.arms = [0, 1].map(() => stick(3.2, 1.2, jacket));
     const body = new Container();
-    body.addChild(torso, head);
+    body.addChild(
+      new Graphics().roundRect(-1.4, -4.2, 2.8, 4.6, 1.2).fill(jacket).stroke({ width: 0.6, color: 0x1d1d22 }),
+      new Graphics()
+        .circle(0.6, -5.8, 1.5)
+        .fill(SKIN)
+        .stroke({ width: 0.5, color: 0x5a3c25 })
+        .poly([-1, -6.2, 0.6, -8.2, 2.2, -6.2])
+        .fill(hat)
+        .circle(0.6, -8.4, 0.7)
+        .fill(0xffffff),
+    );
     body.position.set(0, -5);
     body.rotation = 0.25;
-    for (const leg of this.legs) {
-      leg.position.set(0, -5);
-    }
-    for (const arm of this.arms) {
-      arm.position.set(0.4, -8.8);
-    }
-    for (const pole of this.poles) {
-      pole.position.set(0.4, -8.8);
-    }
-    this.figure.addChild(this.poles[1], this.arms[1], this.legs[1], this.skis[1], this.skis[0], this.legs[0], body, this.arms[0], this.poles[0]);
-    this.figure.scale.set(scale);
-    this.root.addChild(shadow, this.figure);
+    for (const leg of this.legs) leg.position.set(0, -5);
+    for (const arm of this.arms) arm.position.set(0.4, -8.8);
+    for (const pole of this.poles) pole.position.set(0.4, -8.8);
+    this.root.addChild(this.poles[1], this.arms[1], this.legs[1], this.legs[0], body, this.arms[0], this.poles[0]);
   }
 
-  pose(stride: number, facing: number) {
-    const s = Math.sin(stride);
+  pose(s: number) {
     for (const [i, sign] of [[0, 1], [1, -1]] as const) {
       this.legs[i].rotation = -s * 0.45 * sign;
-      this.skis[i].x = s * 2.2 * sign;
       this.arms[i].rotation = s * 0.9 * sign;
       // Poles plant behind the hand of the arm swinging back.
       this.poles[i].rotation = s * 0.6 * sign + 0.25;
     }
-    this.figure.scale.x = Math.abs(this.figure.scale.x) * facing;
+  }
+}
+
+/** Seen from in front (coming towards the viewer) or from behind (skiing away). */
+class EndFigure {
+  readonly root = new Container();
+  private readonly legs = [0, 1].map(() => stick(5, 1.5, PANTS));
+  private readonly arms: Graphics[];
+  private readonly poles = [0, 1].map(() => new Graphics());
+
+  constructor(jacket: number, hat: number, front: boolean) {
+    this.arms = [0, 1].map(() => stick(3.2, 1.2, jacket));
+    this.legs.forEach((leg, i) => leg.position.set(i === 0 ? -0.9 : 0.9, -5));
+    this.arms.forEach((arm, i) => arm.position.set(i === 0 ? -1.7 : 1.7, -8.6));
+    const head = new Graphics().circle(0, -10.4, 1.5).fill(front ? SKIN : 0x6b4a2f).stroke({ width: 0.5, color: 0x5a3c25 });
+    if (front) {
+      head.circle(-0.55, -10.5, 0.25).circle(0.55, -10.5, 0.25).fill(0x23323d);
+    }
+    head.poly([-1.6, -11, 0, -13, 1.6, -11]).fill(hat).circle(0, -13.2, 0.7).fill(0xffffff);
+    const torso = new Graphics().roundRect(-1.7, -9.2, 3.4, 4.6, 1.2).fill(jacket).stroke({ width: 0.6, color: 0x1d1d22 });
+    if (!front) {
+      torso.roundRect(-1.1, -8.6, 2.2, 2.4, 0.6).fill({ color: 0x000000, alpha: 0.18 });
+    }
+    this.root.addChild(...this.poles, ...this.legs, torso, ...this.arms, head);
+  }
+
+  pose(s: number) {
+    for (const [i, sign] of [[0, 1], [1, -1]] as const) {
+      const side = i === 0 ? -1 : 1;
+      // Seen end-on, a leg swinging forward mostly just looks shorter.
+      this.legs[i].scale.y = 1 - Math.max(0, s * sign) * 0.25;
+      this.arms[i].scale.y = 1 - Math.abs(s) * 0.35;
+      this.arms[i].rotation = side * (0.25 + Math.max(0, -s * sign) * 0.25) * -1;
+      const handX = side * (2.3 + Math.max(0, -s * sign) * 0.6);
+      const handY = -6 - Math.max(0, s * sign) * 0.8;
+      this.poles[i].clear().moveTo(handX, handY).lineTo(side * 3.4, 0.4 - s * sign * 1.2).stroke({ width: 0.6, color: 0x55606b });
+    }
+  }
+}
+
+/**
+ * A little cross-country skier in diagonal stride. Skis and shadow lie on the ground and
+ * turn with the track; the upright figure shows its side, front or back depending on heading.
+ */
+class SkierSprite {
+  readonly root = new Container();
+  private readonly ground = new Container();
+  private readonly skis = [0, 1].map(() => new Graphics().roundRect(-4.5, -0.55, 9, 1.1, 0.5).fill(0x3b2a20));
+  private readonly side: SideFigure;
+  private readonly front: EndFigure;
+  private readonly back: EndFigure;
+  private readonly upright = new Container();
+
+  constructor(jacket: number, hat: number, scale: number) {
+    this.ground.addChild(new Graphics().ellipse(0, 0, 5, 1.6).fill({ color: 0x3c548c, alpha: 0.22 }), ...this.skis);
+    this.side = new SideFigure(jacket, hat);
+    this.front = new EndFigure(jacket, hat, true);
+    this.back = new EndFigure(jacket, hat, false);
+    this.upright.addChild(this.side.root, this.front.root, this.back.root);
+    this.root.addChild(this.ground, this.upright);
+    this.root.scale.set(scale);
+  }
+
+  pose(stride: number, heading: number) {
+    const s = Math.sin(stride);
+    const c = Math.cos(heading);
+    const along = Math.sin(heading);
+    this.ground.rotation = heading;
+    this.skis[0].x = s * 2.2;
+    this.skis[1].x = -s * 2.2;
+    this.skis[0].y = -0.9;
+    this.skis[1].y = 0.9;
+
+    const sideways = Math.abs(c) >= 0.42;
+    this.side.root.visible = sideways;
+    this.front.root.visible = !sideways && along > 0;
+    this.back.root.visible = !sideways && along <= 0;
+    if (sideways) {
+      this.side.root.scale.x = c < 0 ? -1 : 1;
+      this.side.pose(s);
+    } else {
+      (along > 0 ? this.front : this.back).pose(s);
+    }
   }
 }
 
@@ -123,8 +196,9 @@ class Skier {
   private qualitySum = 0;
   private home: [number, number][] | null = null;
   private stride = Math.random() * 6;
-  private readonly lane = (Math.random() - 0.5) * 5;
-  private facing = 1;
+  private readonly lane = (Math.random() - 0.5) * 3;
+  private heading = 0;
+  private shownHeading = 0;
   done = false;
   satisfaction = 0;
   said = false;
@@ -151,8 +225,8 @@ class Skier {
       const cx = this.target[0] + 0.5;
       const cy = this.target[1] + 0.5;
       const dist = Math.hypot(cx - this.px, cy - this.py);
-      if (Math.abs(cx - this.px) > 0.05) {
-        this.facing = cx < this.px ? -1 : 1;
+      if (dist > 0.05) {
+        this.heading = Math.atan2(cy - this.py, cx - this.px);
       }
       if (dist > budget) {
         this.px += ((cx - this.px) / dist) * budget;
@@ -236,12 +310,20 @@ class Skier {
     this.satisfaction = Math.max(0, Math.min(1, avg * (0.7 + 0.3 * variety) * longEnough * penalty));
   }
 
-  animate(visible: boolean) {
+  animate(dt: number, visible: boolean) {
     this.sprite.root.visible = visible;
-    if (visible) {
-      this.sprite.pose(this.stride, this.facing);
-      this.sprite.root.position.set(this.px * PX, this.py * PX + 2 + this.lane);
+    if (!visible) {
+      this.shownHeading = this.heading;
+      return;
     }
+    // Turn smoothly so the zigzag of tile-to-tile steps reads as one curve.
+    let turn = this.heading - this.shownHeading;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    this.shownHeading += turn * Math.min(1, dt * 8);
+    this.sprite.pose(this.stride, this.shownHeading);
+    const nx = -Math.sin(this.shownHeading) * this.lane;
+    const ny = Math.cos(this.shownHeading) * this.lane;
+    this.sprite.root.position.set(this.px * PX + nx, this.py * PX + 2 + ny);
   }
 
   get bored(): boolean {
@@ -533,7 +615,7 @@ export class Crowd {
 
   animate(dt: number, detail: boolean) {
     for (const s of this.skiers) {
-      s.animate(detail);
+      s.animate(dt, detail);
     }
     for (const t of this.talk) {
       t.ttl -= dt;
