@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="nb">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Løype Tycoon</title>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div id="topbar">
+      <div id="hud"></div>
+      <div id="tools">
+        <button data-tool="look" title="1">👀 Se</button>
+        <button data-tool="build" title="2">⛷ Bygg løype</button>
+        <button data-tool="remove" title="3">✖ Fjern</button>
+        <button id="snow" title="N">❄ Snøvær</button>
+      </div>
+    </div>
+    <div id="info"></div>
+    <div id="help" hidden>
+      <h2>Tastatur</h2>
+      <table>
+        <tr><th>Num Lock / T</th><td>Tråkkemodus av/på: løypemannskapet legger spor der det går</td></tr>
+        <tr><th>Numpad 1–9<br>Q W E · A D · Z X C</th><td>Flytt løypemannskapet i åtte retninger</td></tr>
+        <tr><th>Backspace</th><td>Fjern løype der mannskapet står</td></tr>
+        <tr><th>+ / − · PgUp / PgDn</th><td>Zoom inn / ut</td></tr>
+        <tr><th>Piltaster</th><td>Flytt kartet</td></tr>
+        <tr><th>1 · 2 · 3</th><td>Musverktøy: se · bygg · fjern</td></tr>
+        <tr><th>N</th><td>Snøvær av/på</td></tr>
+        <tr><th>H</th><td>Denne hjelpen</td></tr>
+      </table>
+      <p>Mus: dra for å bygge, høyreklikk-dra for å flytte kartet, rull for å zoome.
+        Styreflate: knip for å zoome, to fingre for å flytte.</p>
+    </div>
+    <div id="loading">Tråkker opp kartet…</div>
+    <div id="attribution"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

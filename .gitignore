@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+tools/mapgen/cache/
+game/node_modules/
+game/dist/
