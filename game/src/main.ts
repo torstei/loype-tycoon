@@ -1,15 +1,28 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { Camera, OVERVIEW_BELOW } from "./camera";
+import { dayLabel, GameClock, SPEEDS } from "./clock";
+import { Fleet } from "./groomer";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
 import { PX, renderLandscape } from "./render";
 import { FLAG_NAMES, TERRAIN_NAMES } from "./terrain";
-import { lineTiles, TrackNetwork } from "./tracks";
-import { Snowfall, Whimsy } from "./whimsy";
+import { Condition, CONDITION_NAMES, lineTiles, TrackNetwork } from "./tracks";
+import { Weather, WEATHER_ICON } from "./weather";
+import { Precipitation, Whimsy } from "./whimsy";
 import "./style.css";
 
-type Tool = "look" | "build" | "remove";
+type Tool = "look" | "build" | "remove" | "garage";
+
+/** Outline, groomed band, grooves, gap between the grooves. */
+const TRACK_STYLE: Record<Condition, [number, number, number, number]> = {
+  fresh: [0x1b3f7a, 0xf4f8ff, 0x2f6fe0, 0xf4f8ff],
+  ok: [0x34507e, 0xeef2f8, 0x7798d8, 0xeef2f8],
+  worn: [0x6a7890, 0xe4e8ee, 0xb2bdcc, 0xe4e8ee],
+  snowed: [0xa6b3c8, 0xffffff, 0xffffff, 0xffffff],
+  icy: [0x3f7ea8, 0xd6efff, 0x7cc0e8, 0xeaf8ff],
+  bare: [0x6b4a30, 0xb89878, 0x8a6a4a, 0xb89878],
+};
 
 /** Eight directions on the numeric keypad, and the same pattern around S for keyboards without one. */
 const STEP_KEYS: Record<string, [number, number]> = {
@@ -31,6 +44,10 @@ const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
 async function main() {
   const map = await GameMap.load("hakadal");
   const tracks = new TrackNetwork(map);
+  const clock = new GameClock();
+  const weather = new Weather();
+  weather.advance(0, clock.hours);
+  const fleet = new Fleet(map);
   let budget = START_BUDGET;
   let tool: Tool = "build";
 
@@ -57,7 +74,7 @@ async function main() {
   world.addChild(frame, overview, detail);
 
   const trackLayer = new Graphics();
-  world.addChild(trackLayer);
+  world.addChild(trackLayer, fleet.garageLayer, fleet.machineLayer);
   const cursor = new Graphics();
   world.addChild(cursor);
   const whimsy = new Whimsy(map);
@@ -68,17 +85,57 @@ async function main() {
   const labels = new Container();
   world.addChild(labels);
   const signs = addPoiLabels(map, labels);
-  const snowfall = new Snowfall();
-  app.stage.addChild(snowfall.layer);
+  const night = new Graphics();
+  const lightsWorld = new Container();
+  lightsWorld.addChild(fleet.lights);
+  const precipitation = new Precipitation();
+  app.stage.addChild(night, lightsWorld, precipitation.layer);
+  const ledger = {
+    spend: (amount: number) => {
+      if (amount > budget) {
+        return false;
+      }
+      budget -= amount;
+      return true;
+    },
+  };
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks } });
+    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
+  let sinceRedraw = 0;
+  let sinceHud = 0;
+  let forecastDay = -1;
   app.ticker.add((ticker) => {
     const dt = Math.min(0.1, ticker.deltaMS / 1000);
+    const hours = clock.tick(dt);
+    if (hours > 0) {
+      const { snow, rain } = weather.advance(clock.hours - hours, hours);
+      tracks.applyWeather(hours, weather, snow, rain);
+      fleet.update(hours, clock.hours, clock.hourOfDay, tracks, weather, ledger);
+      sinceRedraw += hours;
+      if (sinceRedraw >= 0.25) {
+        sinceRedraw = 0;
+        redrawTracks();
+      }
+    }
+    sinceHud += dt;
+    if (sinceHud >= 0.25) {
+      sinceHud = 0;
+      refreshHud();
+    }
+    if (clock.day !== forecastDay) {
+      forecastDay = clock.day;
+      refreshForecast();
+    }
+    const darkness = 1 - clock.daylight();
+    night.clear().rect(0, 0, app.screen.width, app.screen.height).fill({ color: 0x0b1a3a, alpha: darkness * 0.5 });
+    lightsWorld.position.copyFrom(world.position);
+    lightsWorld.scale.copyFrom(world.scale);
+    fleet.animate(dt, darkness);
     camera.update(dt);
     world.x = Math.min(app.screen.width / 2, Math.max(app.screen.width / 2 - mapW * world.scale.x, world.x));
     world.y = Math.min(app.screen.height / 2, Math.max(app.screen.height / 2 - mapH * world.scale.y, world.y));
@@ -94,17 +151,31 @@ async function main() {
     const br = world.toLocal({ x: app.screen.width, y: app.screen.height });
     whimsy.update(dt, { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y });
     crew.update(dt);
-    snowfall.update(dt, app.screen.width, app.screen.height);
+    const kind = weather.precipRate <= 0 ? "none" : weather.temperature < 0.8 ? "snow" : "rain";
+    precipitation.update(dt, app.screen.width, app.screen.height, kind, weather.precipRate / 1.5);
   });
 
   const hud = document.getElementById("hud")!;
   const info = document.getElementById("info")!;
   document.getElementById("attribution")!.textContent = map.attribution;
 
+  const topbar = document.getElementById("topbar")!;
+  const placePanels = () => {
+    const top = `${topbar.offsetHeight + 8}px`;
+    document.getElementById("forecast")!.style.top = top;
+    document.getElementById("help")!.style.top = top;
+  };
+  new ResizeObserver(placePanels).observe(topbar);
+  const fleetPanel = document.getElementById("fleet")!;
+  const forecastPanel = document.getElementById("forecast")!;
+
   const refreshHud = () => {
     const km = (tracks.size * map.tileSize) / 1000;
+    const nowIcon = weather.precipRate > 0 ? (weather.temperature < 0.8 ? "🌨️" : "🌧️") : clock.daylight() > 0.5 ? "☀️" : "🌙";
     hud.innerHTML = `
       <strong>Løype Tycoon</strong> · ${map.title}
+      <span class="clock">${clock.paused ? "⏸ " : ""}${clock.label()}</span>
+      <span>${nowIcon} ${weather.temperature.toFixed(0)} °C · snø ${weather.snowDepth.toFixed(0)} cm</span>
       <span>Kasse: ${kr(budget)}</span>
       <span>Løypenett: ${km.toFixed(2)} km</span>
       <span class="mode ${crew.building ? "on" : ""}">Tråkkemodus: ${crew.building ? "PÅ" : "av"}</span>
@@ -112,21 +183,61 @@ async function main() {
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-tool]")) {
       btn.classList.toggle("active", btn.dataset.tool === tool);
     }
+    for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-speed]")) {
+      const i = Number(btn.dataset.speed);
+      btn.classList.toggle("active", i < 0 ? clock.paused : !clock.paused && clock.speedIndex === i);
+    }
+    const garageTool = document.querySelector<HTMLButtonElement>('[data-tool="garage"]')!;
+    garageTool.title = `4 · ${kr(fleet.nextGarageCost)}`;
+    fleetPanel.hidden = fleet.groomers.length === 0;
+    fleetPanel.innerHTML = `
+      <div class="head"><strong>Løypemaskiner</strong>
+        <button id="schedule">${fleet.schedule === "night" ? "🌙 Prepper om natta" : "🕑 Prepper døgnet rundt"}</button></div>
+      ${fleet.groomers.map((g) => `<div class="row"><span class="name">🚜 ${g.name}</span> ${g.status}</div>`).join("")}`;
+  };
+  fleetPanel.addEventListener("pointerdown", (e) => {
+    if ((e.target as HTMLElement).id === "schedule") {
+      fleet.schedule = fleet.schedule === "night" ? "always" : "night";
+      refreshHud();
+    }
+  });
+
+  const refreshForecast = () => {
+    const days = weather.forecast(clock.day, 3);
+    forecastPanel.innerHTML = `
+      <div class="days">${days
+        .map(
+          (f, i) => `<div class="day"><div class="when">${i === 0 ? "I dag" : dayLabel(f.day)}</div>
+            <div class="icon">${WEATHER_ICON[f.kind]}</div>
+            <div>${f.low}° / ${f.high}°</div>
+            <div class="mm">${f.precip > 0 ? `${f.precip} ${f.kind === "snø" ? "cm" : "mm"}` : "&nbsp;"}</div></div>`,
+        )
+        .join("")}</div>
+      <div class="saying">${weather.saying(clock.day)}</div>`;
   };
 
   const redrawTracks = () => {
     trackLayer.clear();
     const { lines, dots } = tracks.segments();
-    // Stacked strokes leave two blue grooves in a groomed white band.
-    for (const [width, color] of [[11, 0x1b3f7a], [9, 0xf4f8ff], [5, 0x2f6fe0], [2.5, 0xf4f8ff]] as const) {
-      for (const [x0, y0, x1, y1] of lines) {
-        trackLayer.moveTo(x0 * PX, y0 * PX).lineTo(x1 * PX, y1 * PX);
+    const at = (x: number, y: number) => tracks.condition(Math.floor(x), Math.floor(y), weather);
+    for (const condition of Object.keys(TRACK_STYLE) as Condition[]) {
+      const segs = lines.filter(([x0, y0]) => at(x0, y0) === condition);
+      const pts = dots.filter(([x, y]) => at(x, y) === condition);
+      if (segs.length === 0 && pts.length === 0) {
+        continue;
       }
-      trackLayer.stroke({ width, color, cap: "round", join: "round" });
-      for (const [x, y] of dots) {
-        trackLayer.circle(x * PX, y * PX, width / 2);
+      // Stacked strokes leave two grooves in a groomed band.
+      const [outline, band, groove, gap] = TRACK_STYLE[condition];
+      for (const [width, color] of [[11, outline], [9, band], [5, groove], [2.5, gap]] as const) {
+        for (const [x0, y0, x1, y1] of segs) {
+          trackLayer.moveTo(x0 * PX, y0 * PX).lineTo(x1 * PX, y1 * PX);
+        }
+        trackLayer.stroke({ width, color, cap: "round", join: "round" });
+        for (const [x, y] of pts) {
+          trackLayer.circle(x * PX, y * PX, width / 2);
+        }
+        trackLayer.fill(color);
       }
-      trackLayer.fill(color);
     }
   };
 
@@ -143,11 +254,24 @@ async function main() {
     const flags = FLAG_NAMES.filter(([f]) => map.has(x, y, f)).map(([, n]) => n);
     const cost = tracks.cost(x, y);
     const poi = map.pois.find((p) => Math.abs(p.x - x) <= 2 && Math.abs(p.y - y) <= 2 && p.name);
+    const elevation = map.elevationAt(x, y);
+    const i = map.index(x, y);
+    let action = cost === null ? "Kan ikke bygge her" : `Bygge løype: ${kr(cost)}`;
+    if (tracks.has(x, y)) {
+      const since = clock.hours - tracks.groomedAt[i];
+      const groomed = Number.isFinite(since) ? `preppet for ${since < 1 ? "under en time" : `${Math.floor(since)} t`} siden` : "aldri preppet";
+      action = `<strong>Løype: ${CONDITION_NAMES[tracks.condition(x, y, weather)]}</strong>
+        (${Math.round(tracks.quality(x, y, weather) * 100)} %)<br>
+        nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}`;
+    } else if (tool === "garage") {
+      action = fleet.canPlace(x, y, tracks) ? `Garasje: ${kr(fleet.nextGarageCost)}` : "Kan ikke sette garasje her";
+    }
     info.innerHTML = `
       ${poi ? `<strong>${poi.name}</strong><br>` : ""}
       ${TERRAIN_NAMES[map.terrainAt(x, y)]}${flags.length ? ` · ${flags.join(", ")}` : ""}<br>
-      ${map.elevationAt(x, y)} moh · stigning ${map.slopeAt(x, y).toFixed(0)} %<br>
-      ${cost === null ? "Kan ikke bygge her" : `Løype: ${kr(cost)}`}`;
+      ${elevation} moh · stigning ${map.slopeAt(x, y).toFixed(0)} % ·
+      ${weather.localTemperature(elevation).toFixed(0)} °C · snø ${weather.snowDepthAt(elevation).toFixed(0)} cm<br>
+      ${action}`;
     cursor.clear().rect(x * PX, y * PX, PX, PX).stroke({ width: 2, color: cost === null ? 0xc0392b : 0x1f5fd1 });
   };
 
@@ -190,6 +314,18 @@ async function main() {
     }
     if (e.button === 0 && tool === "look") {
       [crew.x, crew.y] = tileAt(e.offsetX, e.offsetY);
+    }
+    if (e.button === 0 && tool === "garage") {
+      const [gx, gy] = tileAt(e.offsetX, e.offsetY);
+      if (fleet.canPlace(gx, gy, tracks) && budget >= fleet.nextGarageCost) {
+        budget -= fleet.nextGarageCost;
+        fleet.place(gx, gy);
+        setTool("look");
+      } else {
+        crew.refuse();
+      }
+      refreshHud();
+      return;
     }
     if (e.button === 0 && tool !== "look") {
       painting = tileAt(e.offsetX, e.offsetY);
@@ -314,9 +450,21 @@ async function main() {
   }
   const snowButton = document.getElementById("snow")!;
   const toggleSnow = () => {
-    snowfall.enabled = !snowfall.enabled;
-    snowButton.classList.toggle("active", snowfall.enabled);
+    precipitation.enabled = !precipitation.enabled;
+    snowButton.classList.toggle("active", precipitation.enabled);
   };
+  const setSpeed = (i: number) => {
+    if (i < 0) {
+      clock.paused = !clock.paused;
+    } else {
+      clock.paused = false;
+      clock.speedIndex = Math.max(0, Math.min(SPEEDS.length - 1, i));
+    }
+    refreshHud();
+  };
+  for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-speed]")) {
+    btn.addEventListener("click", () => setSpeed(Number(btn.dataset.speed)));
+  }
   snowButton.classList.add("active");
   snowButton.addEventListener("click", toggleSnow);
   const help = document.getElementById("help")!;
@@ -340,6 +488,12 @@ async function main() {
       tracks.remove(crew.x, crew.y);
       redrawTracks();
       refreshHud();
+    } else if (e.code === "Space") {
+      setSpeed(-1);
+    } else if (e.code === "Period") {
+      setSpeed(clock.speedIndex + 1);
+    } else if (e.code === "Comma") {
+      setSpeed(clock.speedIndex - 1);
     } else if (e.code === "KeyN") {
       toggleSnow();
     } else if (e.code === "KeyH" || e.key === "?") {
@@ -347,7 +501,7 @@ async function main() {
     } else if (e.code === "Escape") {
       help.hidden = true;
     } else {
-      const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove" } as Record<string, Tool>)[e.code];
+      const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage" } as Record<string, Tool>)[e.code];
       if (!t) {
         return;
       }

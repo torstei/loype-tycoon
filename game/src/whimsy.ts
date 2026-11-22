@@ -465,34 +465,50 @@ export class Whimsy {
   }
 }
 
-/** Screen-space snowfall over the whole view. */
-export class Snowfall {
+export type PrecipKind = "snow" | "rain" | "none";
+
+/** Screen-space snow or rain over the whole view, as heavy as the weather says. */
+export class Precipitation {
   readonly layer = new Graphics();
   private flakes: { x: number; y: number; r: number; v: number; phase: number }[] = [];
   enabled = true;
 
-  constructor(count = 160) {
+  constructor(count = 260) {
     for (let i = 0; i < count; i++) {
       this.flakes.push({ x: Math.random(), y: Math.random(), r: 0.8 + Math.random() * 1.8, v: 0.03 + Math.random() * 0.05, phase: Math.random() * 6 });
     }
   }
 
-  update(dt: number, width: number, height: number) {
+  /** intensity: 0 … 1, roughly mm per hour / 2. */
+  update(dt: number, width: number, height: number, kind: PrecipKind, intensity: number) {
     this.layer.clear();
-    this.layer.visible = this.enabled;
-    if (!this.enabled) {
+    const active = this.enabled && kind !== "none" ? Math.round(this.flakes.length * Math.min(1, intensity)) : 0;
+    this.layer.visible = active > 0;
+    if (active === 0) {
       return;
     }
-    for (const f of this.flakes) {
-      f.y += f.v * dt * (0.6 + f.r * 0.3);
+    const rain = kind === "rain";
+    for (let i = 0; i < active; i++) {
+      const f = this.flakes[i];
+      f.y += f.v * dt * (rain ? 9 : 0.6 + f.r * 0.3);
       f.phase += dt;
       if (f.y > 1.02) {
         f.y = -0.02;
         f.x = Math.random();
       }
-      this.layer.circle(f.x * width + Math.sin(f.phase) * 8 * f.r, f.y * height, f.r);
+      const x = f.x * width;
+      const y = f.y * height;
+      if (rain) {
+        this.layer.moveTo(x, y).lineTo(x - 3, y + 9 + f.r * 3);
+      } else {
+        this.layer.circle(x + Math.sin(f.phase) * 8 * f.r, y, f.r);
+      }
     }
-    this.layer.fill({ color: 0xffffff, alpha: 0.9 });
-    this.layer.stroke({ width: 0.8, color: 0x7f93b3, alpha: 0.55 });
+    if (rain) {
+      this.layer.stroke({ width: 1.1, color: 0x6f86a8, alpha: 0.6 });
+    } else {
+      this.layer.fill({ color: 0xffffff, alpha: 0.9 });
+      this.layer.stroke({ width: 0.8, color: 0x7f93b3, alpha: 0.55 });
+    }
   }
 }

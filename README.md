@@ -28,8 +28,18 @@ Controls (press `H` in the game for the full list):
   the track under the crew.
 - **Mouse**: left-drag paints track (tool 2) or removes it (tool 3); right-drag pans; the
   wheel steps through the zoom levels. On a touchpad, pinch zooms and two-finger scroll pans.
+- **Time**: Space pauses, `,`/`.` slow down / speed up (1×–8×; a game day is a minute at
+  1×). The season runs from 1 December to 31 March.
+- **Grooming**: tool `4` places a garage next to the track; the first comes with the
+  club's old snowcat. Machines go out when tracks need it (by default only at night),
+  groom their way round the network and drive home. Diesel is paid per tile groomed.
 - `+`/`-` or PageUp/PageDown zoom (the outermost two levels show the overview map); arrow
-  keys pan; `1`/`2`/`3` pick the mouse tool; `N` toggles snowfall. Click a moose.
+  keys pan; `1`–`4` pick the mouse tool; `N` hides or shows precipitation. Click a moose.
+
+Weather is generated per season: temperature with a seasonal curve, fronts and daily
+swings, snow and rain, and a snowpack that is deeper higher up. Each track tile tracks
+how fresh it is, how much new snow lies in it and how icy it is; tracks are drawn by
+condition, from crisp blue corduroy to worn, snowed-in, icy or bare.
 
 Append `?debug` to the URL to expose the game state as `window.loype` for poking at
 from the browser console or a test script.
