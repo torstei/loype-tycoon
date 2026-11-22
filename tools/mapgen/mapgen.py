@@ -6,6 +6,7 @@ Downloads are cached under tools/mapgen/cache/, so re-running only re-rasterises
 """
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -37,22 +38,49 @@ DTM_WCS = "https://wcs.geonorge.no/skwms1/wcs.hoyde-dtm-nhm-25833"
 CRS = "EPSG:25833"
 
 
+# Every map is cut from one global grid of 25 m tiles in EPSG:25833: tile (col, row) covers
+# easting [col * 25, col * 25 + 25) and northing [row * 25, row * 25 + 25). Saved games refer
+# to tiles by these grid coordinates, so maps can grow or overlap without breaking them.
+# Changing GRID_M would break every saved game.
+GRID_M = 25
+
+
 @dataclass(frozen=True)
 class Region:
     name: str
     title: str
-    min_x: float
-    min_y: float
-    size_m: int
-    tile_m: int
+    col: int
+    """Grid column of the western edge."""
+    row: int
+    """Grid row of the southern edge."""
+    cols: int
+    rows: int
+
+    tile_m = GRID_M
 
     @property
-    def tiles(self):
-        return self.size_m // self.tile_m
+    def min_x(self):
+        return self.col * GRID_M
+
+    @property
+    def min_y(self):
+        return self.row * GRID_M
+
+    @property
+    def max_x(self):
+        return (self.col + self.cols) * GRID_M
+
+    @property
+    def max_y(self):
+        return (self.row + self.rows) * GRID_M
+
+    @property
+    def cache_key(self):
+        return f"{self.name}-{self.col}-{self.row}-{self.cols}x{self.rows}"
 
 
 REGIONS = {
-    "hakadal": Region("hakadal", "Hakadal", 265400, 6667900, 5000, 25),
+    "hakadal": Region("hakadal", "Hakadal", col=10616, row=266716, cols=200, rows=200),
 }
 
 # Terrain ids are shared with the game (game/src/terrain.ts); keep the two in sync.
@@ -107,7 +135,7 @@ out geom;"""
 
 
 def fetch_osm(region, bbox_ll):
-    path = CACHE / f"{region.name}-osm.json"
+    path = CACHE / f"{region.cache_key}-osm.json"
     if path.exists():
         return json.loads(path.read_text())
     query = overpass_query(bbox_ll)
@@ -131,15 +159,13 @@ def fetch_osm(region, bbox_ll):
 
 
 def fetch_dtm(region):
-    path = CACHE / f"{region.name}-dtm-{region.tile_m}m.tif"
+    path = CACHE / f"{region.cache_key}-dtm.tif"
     if not path.exists():
-        n = region.tiles
         params = {
             "service": "WCS", "version": "1.0.0", "request": "GetCoverage",
             "coverage": "nhm_dtm_topo_25833", "crs": CRS, "format": "GeoTIFF",
-            "bbox": f"{region.min_x},{region.min_y},"
-                    f"{region.min_x + region.size_m},{region.min_y + region.size_m}",
-            "width": n, "height": n,
+            "bbox": f"{region.min_x},{region.min_y},{region.max_x},{region.max_y}",
+            "width": region.cols, "height": region.rows,
         }
         print("  kartverket: DTM", file=sys.stderr)
         r = requests.get(DTM_WCS, params=params, headers={"User-Agent": USER_AGENT}, timeout=120)
@@ -191,16 +217,16 @@ def matches(tags, rule):
 
 def build_layers(region, osm):
     to_utm = Transformer.from_crs("EPSG:4326", CRS, always_xy=True).transform
-    n = region.tiles
-    transform = from_origin(region.min_x, region.min_y + region.size_m, region.tile_m, region.tile_m)
-    clip = box(region.min_x, region.min_y, region.min_x + region.size_m, region.min_y + region.size_m)
+    shape = (region.rows, region.cols)
+    transform = from_origin(region.min_x, region.max_y, GRID_M, GRID_M)
+    clip = box(region.min_x, region.min_y, region.max_x, region.max_y)
 
     def utm(geom):
         g = shapely.transform(geom, to_utm, interleaved=False)
         return g.intersection(clip)
 
-    terrain = np.full((n, n), FOREST, dtype=np.uint8)
-    flags = np.zeros((n, n), dtype=np.uint16)
+    terrain = np.full(shape, FOREST, dtype=np.uint8)
+    flags = np.zeros(shape, dtype=np.uint16)
     areas = {cls: [] for cls, _ in LANDCOVER_RULES}
     lines = {f: [] for f in (ROAD, FOREST_ROAD, RAIL, PATH, STREAM, PISTE)}
     buildings = []
@@ -266,28 +292,28 @@ def build_layers(region, osm):
     for cls, _ in LANDCOVER_RULES:
         geoms = [mapping(g) for g in areas[cls] if not g.is_empty]
         if geoms:
-            mask = rasterize(geoms, out_shape=(n, n), transform=transform, fill=0, default_value=1)
+            mask = rasterize(geoms, out_shape=shape, transform=transform, fill=0, default_value=1)
             terrain[mask == 1] = cls
 
     if buildings:
-        mask = rasterize([mapping(g) for g in buildings if not g.is_empty], out_shape=(n, n),
+        mask = rasterize([mapping(g) for g in buildings if not g.is_empty], out_shape=shape,
                          transform=transform, fill=0, default_value=1, all_touched=True)
         flags[mask == 1] |= BUILDING
     for flag, geoms in lines.items():
         geoms = [mapping(g) for g in geoms if not g.is_empty]
         if geoms:
-            mask = rasterize(geoms, out_shape=(n, n), transform=transform, fill=0,
+            mask = rasterize(geoms, out_shape=shape, transform=transform, fill=0,
                              default_value=1, all_touched=True)
             flags[mask == 1] |= flag
     # Quieter roads first, so a tile shared with a busier road ends up with the busier one.
     for level, geoms in sorted(traffic.items()):
         geoms = [mapping(g) for g in geoms if not g.is_empty]
         if geoms:
-            mask = rasterize(geoms, out_shape=(n, n), transform=transform, fill=0, default_value=1, all_touched=True)
+            mask = rasterize(geoms, out_shape=shape, transform=transform, fill=0, default_value=1, all_touched=True)
             flags[mask == 1] = (flags[mask == 1] & np.uint16(0xFFFF ^ (3 << TRAFFIC_SHIFT))) | np.uint16(level << TRAFFIC_SHIFT)
     geoms = [mapping(g) for g in passages if not g.is_empty]
     if geoms:
-        mask = rasterize(geoms, out_shape=(n, n), transform=transform, fill=0, default_value=1, all_touched=True)
+        mask = rasterize(geoms, out_shape=shape, transform=transform, fill=0, default_value=1, all_touched=True)
         flags[mask == 1] |= PASSAGE
 
     pois = [p for p in pois if p is not None]
@@ -305,7 +331,7 @@ def road_label(tags):
 
 def named_roads(region, road_names):
     """Road centre lines with name and traffic, so the game can say which road a track crosses."""
-    top = region.min_y + region.size_m
+    top = region.max_y
     out = []
     for g, label, traffic in road_names:
         if g.is_empty:
@@ -329,7 +355,7 @@ LINE_KINDS = {ROAD: "road", FOREST_ROAD: "forest_road", RAIL: "rail", PATH: "pat
 
 def vector_lines(region, lines):
     """Polylines in tile units for drawing; game rules use the rasterised flags instead."""
-    top = region.min_y + region.size_m
+    top = region.max_y
     out = []
     for flag, geoms in lines.items():
         for g in geoms:
@@ -363,16 +389,16 @@ def poi(el, tags, to_utm, region):
 def poi_at(pt_ll, kind, name, to_utm, region):
     x, y = to_utm(pt_ll.x, pt_ll.y)
     col = int((x - region.min_x) // region.tile_m)
-    row = int((region.min_y + region.size_m - y) // region.tile_m)
-    if not (0 <= col < region.tiles and 0 <= row < region.tiles):
+    row = int((region.max_y - y) // region.tile_m)
+    if not (0 <= col < region.cols and 0 <= row < region.rows):
         return None
     return {"kind": kind, "name": name, "x": col, "y": row}
 
 
 def bbox_latlon(region):
     to_ll = Transformer.from_crs(CRS, "EPSG:4326", always_xy=True).transform
-    xs = [region.min_x, region.min_x + region.size_m]
-    ys = [region.min_y, region.min_y + region.size_m]
+    xs = [region.min_x, region.max_x]
+    ys = [region.min_y, region.max_y]
     corners = [to_ll(x, y) for x in xs for y in ys]
     pad = 0.002
     return (min(c[1] for c in corners) - pad, min(c[0] for c in corners) - pad,
@@ -408,6 +434,14 @@ def write_preview(path, terrain, flags, elev, region, scale=4):
     img.save(path)
 
 
+def content_hash(*arrays):
+    """Short fingerprint of the map content, so a saved game can tell the map has changed."""
+    h = hashlib.sha256()
+    for a in arrays:
+        h.update(np.ascontiguousarray(a).tobytes())
+    return h.hexdigest()[:16]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("region", choices=sorted(REGIONS))
@@ -418,7 +452,7 @@ def main():
     CACHE.mkdir(exist_ok=True)
     args.out.mkdir(parents=True, exist_ok=True)
 
-    print(f"{region.title}: {region.tiles}x{region.tiles} tiles of {region.tile_m} m", file=sys.stderr)
+    print(f"{region.title}: {region.cols}x{region.rows} tiles of {GRID_M} m", file=sys.stderr)
     osm = fetch_osm(region, bbox_latlon(region))
     elev = fetch_dtm(region)
     terrain, flags, pois, lines = build_layers(region, osm)
@@ -426,11 +460,12 @@ def main():
     doc = {
         "name": region.name,
         "title": region.title,
+        "version": content_hash(terrain, flags, elev),
         "crs": CRS,
-        "origin": [region.min_x, region.min_y + region.size_m],
-        "tileSize": region.tile_m,
-        "width": region.tiles,
-        "height": region.tiles,
+        "grid": {"size": GRID_M, "col": region.col, "row": region.row},
+        "tileSize": GRID_M,
+        "width": region.cols,
+        "height": region.rows,
         "terrain": terrain.ravel().tolist(),
         "flags": flags.ravel().tolist(),
         "elevation": np.round(elev).astype(int).ravel().tolist(),

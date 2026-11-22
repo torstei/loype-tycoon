@@ -95,13 +95,21 @@ python3 -m venv .venv
 .venv/bin/python tools/mapgen/mapgen.py hakadal
 ```
 
-Regions are defined in `REGIONS` in `tools/mapgen/mapgen.py` as a south-west corner in
-EPSG:25833 (UTM 33N), a side length and a tile size. Downloads are cached in
-`tools/mapgen/cache/`; delete a region's files there to fetch fresh data. The public
-Overpass servers are often busy, so the tool retries across mirrors with backoff.
+Every map is cut from one global grid of 25 m tiles in EPSG:25833 (UTM 33N): grid tile
+(col, row) covers easting `col·25 … +25` and northing `row·25 … +25`. Regions are defined in
+`REGIONS` in `tools/mapgen/mapgen.py` by the grid column and row of their south-west corner
+and their size in tiles, so every map lines up with every other. Saved games will refer to
+tiles by grid position, which lets a map be extended, regenerated with fresher data or joined
+by neighbouring maps without breaking them. The tile size is fixed for good: changing it would
+break every saved game.
+
+Downloads are cached in `tools/mapgen/cache/`, keyed by region and extent; delete a region's
+files there to fetch fresh data. The public Overpass servers are often busy, so the tool
+retries across mirrors with backoff.
 
 Output per region: `<name>.json` (terrain grid, feature flags, elevation, points of
-interest, vector lines for drawing) and `<name>-preview.png`.
+interest, vector lines for drawing, the region's place on the global grid, and a `version`
+fingerprint of its content) and `<name>-preview.png`.
 
 Terrain ids and flag bits are shared between `mapgen.py` and `game/src/terrain.ts`.
 
