@@ -100,10 +100,19 @@ export class TrackNetwork {
   }
 
   /** Whether a groomer would make a noticeable difference here. */
-  needsGrooming(x: number, y: number, weather: Weather): boolean {
+  needsGrooming(x: number, y: number, weather: Weather, now: number): boolean {
     const i = this.map.index(x, y);
+    if (now - this.groomedAt[i] < 12) {
+      return false;
+    }
     const depth = weather.snowDepthAt(this.map.elevationAt(x, y));
     return depth >= MIN_GROOMING_DEPTH && (this.newSnow[i] >= 3 || this.ice[i] >= 0.4 || this.fresh[i] < 0.7);
+  }
+
+  /** Skis wear the corduroy down a little with every pass. */
+  wear(x: number, y: number, amount: number) {
+    const i = this.map.index(x, y);
+    this.fresh[i] = Math.max(0, this.fresh[i] - amount);
   }
 
   groom(x: number, y: number, weather: Weather, now: number) {

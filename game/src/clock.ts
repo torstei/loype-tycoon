@@ -1,7 +1,7 @@
-/** Real seconds per game hour at 1× speed: a game day lasts a minute. */
-const SECONDS_PER_HOUR = 2.5;
+/** Real seconds per game hour at 1× speed: slow enough to watch a skier finish a trip. */
+const SECONDS_PER_HOUR = 12;
 
-export const SPEEDS = [1, 2, 4, 8];
+export const SPEEDS = [1, 2, 4, 8, 16];
 export const SEASON_DAYS = 121;
 
 const WEEKDAYS = ["søn", "man", "tir", "ons", "tor", "fre", "lør"];
@@ -77,4 +77,23 @@ export function sunTimes(day: number): { sunrise: number; sunset: number } {
   const fromSolstice = Math.min(1, Math.max(0, Math.abs(day - 20) / 100));
   const k = (1 - Math.cos(Math.PI * fromSolstice)) / 2;
   return { sunrise: 9.3 - k * 3.1, sunset: 15.3 + k * 3.7 };
+}
+
+/** How much busier than a normal day of that weekday: holidays and the odd local custom. */
+export function holiday(day: number): { factor: number; name: string | null } {
+  if (day >= 23 && day <= 31) {
+    return { factor: 1.8, name: "juleferie" };
+  }
+  if (day >= 81 && day <= 89) {
+    return { factor: 2, name: "vinterferie" };
+  }
+  if (day >= 110 && day <= 118) {
+    return { factor: 0.7, name: "påske (alle er på fjellet)" };
+  }
+  return { factor: 1, name: null };
+}
+
+export function isWeekend(day: number): boolean {
+  const d = (FIRST_WEEKDAY + day) % 7;
+  return d === 0 || d === 6;
 }

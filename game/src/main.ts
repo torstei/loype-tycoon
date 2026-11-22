@@ -2,6 +2,7 @@ import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js
 import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, GameClock, SPEEDS } from "./clock";
 import { Fleet } from "./groomer";
+import { Crowd } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
@@ -48,6 +49,10 @@ async function main() {
   const weather = new Weather();
   weather.advance(0, clock.hours);
   const fleet = new Fleet(map);
+  let dieselToday = 0;
+  const crowd = new Crowd(map, (amount) => {
+    budget += amount;
+  });
   let budget = START_BUDGET;
   let tool: Tool = "build";
 
@@ -74,7 +79,8 @@ async function main() {
   world.addChild(frame, overview, detail);
 
   const trackLayer = new Graphics();
-  world.addChild(trackLayer, fleet.garageLayer, fleet.machineLayer);
+  const trailheadLayer = new Container();
+  world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, fleet.machineLayer, crowd.layer);
   const cursor = new Graphics();
   world.addChild(cursor);
   const whimsy = new Whimsy(map);
@@ -85,6 +91,7 @@ async function main() {
   const labels = new Container();
   world.addChild(labels);
   const signs = addPoiLabels(map, labels);
+  world.addChild(crowd.bubbles);
   const night = new Graphics();
   const lightsWorld = new Container();
   lightsWorld.addChild(fleet.lights);
@@ -96,13 +103,14 @@ async function main() {
         return false;
       }
       budget -= amount;
+      dieselToday += amount;
       return true;
     },
   };
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet } });
+    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -116,6 +124,7 @@ async function main() {
       const { snow, rain } = weather.advance(clock.hours - hours, hours);
       tracks.applyWeather(hours, weather, snow, rain);
       fleet.update(hours, clock.hours, clock.hourOfDay, tracks, weather, ledger);
+      crowd.update(hours, clock, weather, tracks);
       sinceRedraw += hours;
       if (sinceRedraw >= 0.25) {
         sinceRedraw = 0;
@@ -128,6 +137,9 @@ async function main() {
       refreshHud();
     }
     if (clock.day !== forecastDay) {
+      if (forecastDay >= 0) {
+        closeDay(forecastDay);
+      }
       forecastDay = clock.day;
       refreshForecast();
     }
@@ -143,6 +155,7 @@ async function main() {
     detail.alpha = Math.max(0, Math.min(1, (s - 0.4) / 0.1));
     detail.visible = detail.alpha > 0;
     whimsy.detail = s >= OVERVIEW_BELOW;
+    crowd.animate(dt, s >= OVERVIEW_BELOW);
     for (const { node, kind } of signs) {
       node.scale.set(s < 1 ? 1 / s : 1);
       node.visible = s >= OVERVIEW_BELOW || kind !== "parking";
@@ -177,6 +190,7 @@ async function main() {
       <span class="clock">${clock.paused ? "⏸ " : ""}${clock.label()}</span>
       <span>${nowIcon} ${weather.temperature.toFixed(0)} °C · snø ${weather.snowDepth.toFixed(0)} cm</span>
       <span>Kasse: ${kr(budget)}</span>
+      <span>⛷ ${crowd.today.skiers} i dag · omdømme ${Math.round(crowd.reputation * 100)} %</span>
       <span>Løypenett: ${km.toFixed(2)} km</span>
       <span class="mode ${crew.building ? "on" : ""}">Tråkkemodus: ${crew.building ? "PÅ" : "av"}</span>
       <span class="hint">H = hjelp</span>`;
@@ -216,7 +230,57 @@ async function main() {
       <div class="saying">${weather.saying(clock.day)}</div>`;
   };
 
+  const toast = document.getElementById("toast")!;
+  let toastTimer = 0;
+  const showToast = (html: string) => {
+    toast.innerHTML = html;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => (toast.hidden = true), 7000);
+  };
+
+  const closeDay = (day: number) => {
+    const stats = crowd.endDay();
+    const happy = stats.finished > 0 ? Math.round((stats.satisfaction / stats.finished) * 100) : 0;
+    const diesel = dieselToday;
+    dieselToday = 0;
+    if (stats.skiers === 0 && diesel === 0) {
+      return;
+    }
+    showToast(`<strong>${dayLabel(day)}:</strong> ${stats.skiers} skiløpere · ${happy} % fornøyde ·
+      Vipps <span class="plus">+${kr(stats.donations)}</span>
+      ${stats.members > 0 ? `· ${stats.members} nye medlemmer <span class="plus">+${kr(stats.members * 400)}</span>` : ""}
+      · diesel <span class="minus">−${kr(diesel)}</span>`);
+  };
+
+  let trailheadSignature = "";
+  const refreshTrailheads = () => {
+    crowd.connect(tracks);
+    const connected = crowd.trailheads.filter((h) => h.entry);
+    const signature = connected.map((h) => `${h.x},${h.y}`).join(";");
+    if (signature === trailheadSignature) {
+      return;
+    }
+    trailheadSignature = signature;
+    trailheadLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    for (const h of connected) {
+      const [ex, ey] = h.entry!;
+      const g = new Graphics()
+        .moveTo((h.x + 0.5) * PX, (h.y + 0.5) * PX)
+        .lineTo((ex + 0.5) * PX, (ey + 0.5) * PX)
+        .stroke({ width: 1.5, color: 0x1f8a3a, alpha: 0.6 })
+        .circle((h.x + 0.5) * PX, (h.y + 0.5) * PX, 6)
+        .fill(0x1f8a3a)
+        .stroke({ width: 1.5, color: 0xffffff });
+      const icon = new Text({ text: "⛷", style: { fontSize: 8, fill: 0xffffff }, resolution: 4 });
+      icon.anchor.set(0.5);
+      icon.position.set((h.x + 0.5) * PX, (h.y + 0.5) * PX);
+      trailheadLayer.addChild(g, icon);
+    }
+  };
+
   const redrawTracks = () => {
+    refreshTrailheads();
     trackLayer.clear();
     const { lines, dots } = tracks.segments();
     const at = (x: number, y: number) => tracks.condition(Math.floor(x), Math.floor(y), weather);
@@ -266,12 +330,18 @@ async function main() {
     } else if (tool === "garage") {
       action = fleet.canPlace(x, y, tracks) ? `Garasje: ${kr(fleet.nextGarageCost)}` : "Kan ikke sette garasje her";
     }
+    const head = crowd.trailheads.find((h) => Math.abs(h.x - x) <= 1 && Math.abs(h.y - y) <= 1);
+    const headLine = head
+      ? `<br><span class="${head.entry ? "plus" : "minus"}">⛷ ${head.name}: ${
+          head.entry ? `koblet til løypa · ${head.today} skiløpere i dag` : `ingen løype innen ${head.reach * map.tileSize} m`
+        }</span>`
+      : "";
     info.innerHTML = `
       ${poi ? `<strong>${poi.name}</strong><br>` : ""}
       ${TERRAIN_NAMES[map.terrainAt(x, y)]}${flags.length ? ` · ${flags.join(", ")}` : ""}<br>
       ${elevation} moh · stigning ${map.slopeAt(x, y).toFixed(0)} % ·
       ${weather.localTemperature(elevation).toFixed(0)} °C · snø ${weather.snowDepthAt(elevation).toFixed(0)} cm<br>
-      ${action}`;
+      ${action}${headLine}`;
     cursor.clear().rect(x * PX, y * PX, PX, PX).stroke({ width: 2, color: cost === null ? 0xc0392b : 0x1f5fd1 });
   };
 
@@ -412,7 +482,8 @@ async function main() {
       return;
     }
     if (crew.building) {
-      const problem = buildAt(crew.x, crew.y) ?? buildAt(nx, ny);
+      const here = tracks.cost(crew.x, crew.y) !== null ? buildAt(crew.x, crew.y) : null;
+      const problem = here ?? buildAt(nx, ny);
       redrawTracks();
       refreshHud();
       if (problem) {

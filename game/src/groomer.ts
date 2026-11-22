@@ -4,9 +4,9 @@ import { PX } from "./render";
 import { TrackNetwork } from "./tracks";
 import { Weather } from "./weather";
 
-/** Tiles per game hour. Far slower than a real snowcat, in the tradition of tycoon-game trains. */
-const SPEED = 8;
-const COST_PER_TILE = 15;
+/** Tiles per game hour: 10 km/h, about what a real snowcat manages. */
+const SPEED = 40;
+const COST_PER_TILE = 10;
 const MAX_SHIFT_HOURS = 10;
 const MIN_JOB_TILES = 4;
 
@@ -189,7 +189,7 @@ export class Groomer {
 
   update(hours: number, now: number, hourOfDay: number, schedule: Schedule, tracks: TrackNetwork, weather: Weather, ledger: Ledger) {
     if (this.state === "home") {
-      this.considerLeaving(hourOfDay, schedule, tracks, weather);
+      this.considerLeaving(now, hourOfDay, schedule, tracks, weather);
       return;
     }
     this.shift += hours;
@@ -211,7 +211,7 @@ export class Groomer {
         this.py = cy;
         budget -= dist;
         this.path.shift();
-        if (this.state === "grooming" && tracks.has(tx, ty) && tracks.needsGrooming(tx, ty, weather)) {
+        if (this.state === "grooming" && tracks.has(tx, ty) && tracks.needsGrooming(tx, ty, weather, now)) {
           if (!ledger.spend(COST_PER_TILE)) {
             this.status = "Tom for dieselpenger, kjører hjem";
             this.headHome(tracks);
@@ -235,7 +235,7 @@ export class Groomer {
       return;
     }
     const outOfTime = this.shift >= MAX_SHIFT_HOURS || !inWindow(schedule, hourOfDay);
-    const next = outOfTime ? null : this.findWork(tracks, weather);
+    const next = outOfTime ? null : this.findWork(tracks, weather, now);
     if (next) {
       this.path = next;
       this.status = "Prepper";
@@ -245,7 +245,7 @@ export class Groomer {
     }
   }
 
-  private considerLeaving(hourOfDay: number, schedule: Schedule, tracks: TrackNetwork, weather: Weather) {
+  private considerLeaving(now: number, hourOfDay: number, schedule: Schedule, tracks: TrackNetwork, weather: Weather) {
     const entry = this.garage.entry(tracks);
     if (!entry) {
       this.status = "Garasjen er ikke koblet til løypenettet";
@@ -255,7 +255,7 @@ export class Groomer {
       this.status = "I garasjen (venter på kvelden)";
       return;
     }
-    const needy = this.reachable(entry, tracks).filter(([x, y]) => tracks.needsGrooming(x, y, weather));
+    const needy = this.reachable(entry, tracks).filter(([x, y]) => tracks.needsGrooming(x, y, weather, now));
     if (needy.length < MIN_JOB_TILES) {
       this.status = "I garasjen (alt er fint)";
       return;
@@ -311,12 +311,12 @@ export class Groomer {
     return null;
   }
 
-  private findWork(tracks: TrackNetwork, weather: Weather): [number, number][] | null {
+  private findWork(tracks: TrackNetwork, weather: Weather, now: number): [number, number][] | null {
     const here = this.tile;
-    if (tracks.has(...here) && tracks.needsGrooming(...here, weather)) {
+    if (tracks.has(...here) && tracks.needsGrooming(...here, weather, now)) {
       return [here];
     }
-    return this.pathTo(tracks, (x, y) => tracks.needsGrooming(x, y, weather));
+    return this.pathTo(tracks, (x, y) => tracks.needsGrooming(x, y, weather, now));
   }
 
   private headHome(tracks: TrackNetwork) {

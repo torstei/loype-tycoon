@@ -1,0 +1,559 @@
+import { Container, Graphics, Text } from "pixi.js";
+import { GameClock, holiday, isWeekend, sunTimes } from "./clock";
+import { GameMap } from "./map";
+import { PX } from "./render";
+import { Flag } from "./terrain";
+import { TrackNetwork } from "./tracks";
+import { Weather } from "./weather";
+
+export type TrailheadKind = "station" | "parking" | "homes";
+
+export interface Trailhead {
+  kind: TrailheadKind;
+  name: string;
+  x: number;
+  y: number;
+  /** Station: skiers per train. Parking and homes: skiers per hour at a busy peak. */
+  rate: number;
+  /** How far away, in tiles, a track still counts as reachable on foot. */
+  reach: number;
+  entry: [number, number] | null;
+  /** Track tiles reachable from the entry. */
+  network: number;
+  today: number;
+}
+
+interface SkierKind {
+  name: string;
+  speed: number;
+  minTiles: number;
+  maxTiles: number;
+  donation: number;
+  /** How much worse a poor track feels to this kind of skier. */
+  fussiness: number;
+  slopeDislike: number;
+  wear: number;
+  jacket: number[];
+  scale: number;
+}
+
+const KINDS: Record<"family" | "fitness" | "racer", SkierKind> = {
+  family: { name: "søndagsfamilie", speed: 30, minTiles: 50, maxTiles: 120, donation: 30, fussiness: 0.6, slopeDislike: 1.5, wear: 0.0015, jacket: [0xe8591a, 0xf2c12e, 0x3aa35a, 0xd64a8a], scale: 1.1 },
+  fitness: { name: "mosjonist", speed: 48, minTiles: 110, maxTiles: 280, donation: 25, fussiness: 1, slopeDislike: 0.5, wear: 0.002, jacket: [0x2f5fb0, 0xc8342b, 0x23323d, 0x6a3fa0], scale: 1.2 },
+  racer: { name: "lycraløper", speed: 70, minTiles: 240, maxTiles: 520, donation: 6, fussiness: 1.8, slopeDislike: 0, wear: 0.003, jacket: [0xf7e01a, 0x18c0d8, 0xff3fa0], scale: 1.2 },
+};
+
+const COMPLAINTS = {
+  icy: ["Au! Is!", "Hvem har strødd skøytebane her?", "Glassføre. Takk for det."],
+  snowed: ["Hvor ble sporet av?", "Brøyt da, folkens!", "Jeg ser ikke sporet!"],
+  bare: ["Steinføre…", "Mine stakkars ski!", "Er dette en grusvei?"],
+  worn: ["Sporet er helt nedkjørt.", "Har dere glemt løypemaskina?"],
+  fresh: ["Nydelig spor!", "Dette er livet!", "Strålende preppet!", "Rett i Vipps-en!"],
+  short: ["Var det alt?", "Rundt og rundt og rundt…"],
+};
+
+function pick<T>(xs: T[]): T {
+  return xs[Math.floor(Math.random() * xs.length)];
+}
+
+/** A little cross-country skier in diagonal stride. Faces right. */
+class SkierSprite {
+  readonly root = new Container();
+  private readonly figure = new Container();
+  private readonly legs: Graphics[];
+  private readonly skis: Graphics[];
+  private readonly poles: Graphics[];
+  private readonly arms: Graphics[];
+
+  constructor(jacket: number, hat: number, scale: number) {
+    const pants = 0x23323d;
+    const shadow = new Graphics().ellipse(0, 0.5, 5, 1.2).fill({ color: 0x3c548c, alpha: 0.22 });
+    this.skis = [0, 1].map(() => new Graphics().roundRect(-4.5, -0.6, 9, 1.1, 0.5).fill(0x3b2a20));
+    this.poles = [0, 1].map(() => new Graphics().moveTo(0, 0).lineTo(0, 8).stroke({ width: 0.6, color: 0x55606b }));
+    this.legs = [0, 1].map(() => new Graphics().moveTo(0, 0).lineTo(0, 5).stroke({ width: 1.5, color: pants, cap: "round" }));
+    this.arms = [0, 1].map(() => new Graphics().moveTo(0, 0).lineTo(0, 3.2).stroke({ width: 1.2, color: jacket, cap: "round" }));
+    const torso = new Graphics().roundRect(-1.4, -4.2, 2.8, 4.6, 1.2).fill(jacket).stroke({ width: 0.6, color: 0x1d1d22 });
+    const head = new Graphics()
+      .circle(0.6, -5.8, 1.5)
+      .fill(0xf2c9a0)
+      .stroke({ width: 0.5, color: 0x5a3c25 })
+      .poly([-1, -6.2, 0.6, -8.2, 2.2, -6.2])
+      .fill(hat)
+      .circle(0.6, -8.4, 0.7)
+      .fill(0xffffff);
+    const body = new Container();
+    body.addChild(torso, head);
+    body.position.set(0, -5);
+    body.rotation = 0.25;
+    for (const leg of this.legs) {
+      leg.position.set(0, -5);
+    }
+    for (const arm of this.arms) {
+      arm.position.set(0.4, -8.8);
+    }
+    for (const pole of this.poles) {
+      pole.position.set(0.4, -8.8);
+    }
+    this.figure.addChild(this.poles[1], this.arms[1], this.legs[1], this.skis[1], this.skis[0], this.legs[0], body, this.arms[0], this.poles[0]);
+    this.figure.scale.set(scale);
+    this.root.addChild(shadow, this.figure);
+  }
+
+  pose(stride: number, facing: number) {
+    const s = Math.sin(stride);
+    for (const [i, sign] of [[0, 1], [1, -1]] as const) {
+      this.legs[i].rotation = -s * 0.45 * sign;
+      this.skis[i].x = s * 2.2 * sign;
+      this.arms[i].rotation = s * 0.9 * sign;
+      // Poles plant behind the hand of the arm swinging back.
+      this.poles[i].rotation = s * 0.6 * sign + 0.25;
+    }
+    this.figure.scale.x = Math.abs(this.figure.scale.x) * facing;
+  }
+}
+
+class Skier {
+  readonly sprite: SkierSprite;
+  px: number;
+  py: number;
+  private target: [number, number];
+  private previous: [number, number] | null = null;
+  private readonly visited = new Set<number>();
+  private travelled = 0;
+  private qualitySum = 0;
+  private home: [number, number][] | null = null;
+  private stride = Math.random() * 6;
+  private readonly lane = (Math.random() - 0.5) * 5;
+  private facing = 1;
+  done = false;
+  satisfaction = 0;
+  said = false;
+
+  constructor(
+    readonly kind: SkierKind,
+    readonly start: [number, number],
+    readonly trailhead: Trailhead,
+    private readonly goal: number,
+  ) {
+    this.sprite = new SkierSprite(pick(kind.jacket), pick([0xc8342b, 0x2f5fb0, 0xf2c12e, 0xffffff, 0x3aa35a]), kind.scale);
+    this.px = start[0] + 0.5;
+    this.py = start[1] + 0.5;
+    this.target = start;
+  }
+
+  get tile(): [number, number] {
+    return [Math.floor(this.px), Math.floor(this.py)];
+  }
+
+  update(hours: number, map: GameMap, tracks: TrackNetwork, weather: Weather, say: (s: Skier, text: string) => void) {
+    let budget = hours * this.kind.speed;
+    while (budget > 0 && !this.done) {
+      const cx = this.target[0] + 0.5;
+      const cy = this.target[1] + 0.5;
+      const dist = Math.hypot(cx - this.px, cy - this.py);
+      if (Math.abs(cx - this.px) > 0.05) {
+        this.facing = cx < this.px ? -1 : 1;
+      }
+      if (dist > budget) {
+        this.px += ((cx - this.px) / dist) * budget;
+        this.py += ((cy - this.py) / dist) * budget;
+        this.stride += budget * 2.2;
+        return;
+      }
+      this.px = cx;
+      this.py = cy;
+      budget -= dist;
+      this.stride += dist * 2.2;
+      this.arrive(map, tracks, weather, say);
+    }
+  }
+
+  private arrive(map: GameMap, tracks: TrackNetwork, weather: Weather, say: (s: Skier, text: string) => void) {
+    const [x, y] = this.target;
+    if (!tracks.has(x, y)) {
+      this.finish(0.2);
+      return;
+    }
+    this.travelled++;
+    this.visited.add(map.index(x, y));
+    const q = tracks.quality(x, y, weather);
+    this.qualitySum += Math.pow(q, 0.6 * this.kind.fussiness);
+    tracks.wear(x, y, this.kind.wear);
+    if (!this.said && Math.random() < 0.015) {
+      const c = tracks.condition(x, y, weather);
+      if (c !== "ok") {
+        this.said = true;
+        say(this, pick(COMPLAINTS[c]));
+      }
+    }
+
+    if (this.home) {
+      if (this.home.length === 0) {
+        this.finish();
+        return;
+      }
+      this.previous = this.target;
+      this.target = this.home.shift()!;
+      return;
+    }
+    if (this.travelled >= this.goal / 2) {
+      this.home = pathHome(tracks, [x, y], this.start) ?? [];
+      this.previous = this.target;
+      this.target = this.home.shift() ?? this.start;
+      return;
+    }
+    const options = tracks.neighbours(x, y).filter(([nx, ny]) => !this.previous || nx !== this.previous[0] || ny !== this.previous[1]);
+    const choices = options.length > 0 ? options : tracks.neighbours(x, y);
+    if (choices.length === 0) {
+      this.finish();
+      return;
+    }
+    const here = map.elevationAt(x, y);
+    const weights = choices.map(([nx, ny]) => {
+      const fresh = this.visited.has(map.index(nx, ny)) ? 0.25 : 1;
+      const climb = Math.max(0, map.elevationAt(nx, ny) - here) / map.tileSize;
+      return Math.pow(0.15 + tracks.quality(nx, ny, weather), 2) * fresh * Math.exp(-climb * 10 * this.kind.slopeDislike);
+    });
+    let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+    let chosen = choices[choices.length - 1];
+    for (let i = 0; i < choices.length; i++) {
+      r -= weights[i];
+      if (r <= 0) {
+        chosen = choices[i];
+        break;
+      }
+    }
+    this.previous = this.target;
+    this.target = chosen;
+  }
+
+  /** Done for the day: how happy were they? */
+  private finish(penalty = 1) {
+    this.done = true;
+    const avg = this.travelled > 0 ? this.qualitySum / this.travelled : 0;
+    const variety = this.travelled > 0 ? Math.min(1, (this.visited.size / this.travelled) * 1.8) : 0;
+    const longEnough = Math.min(1, this.travelled / this.goal + 0.3);
+    this.satisfaction = Math.max(0, Math.min(1, avg * (0.7 + 0.3 * variety) * longEnough * penalty));
+  }
+
+  animate(visible: boolean) {
+    this.sprite.root.visible = visible;
+    if (visible) {
+      this.sprite.pose(this.stride, this.facing);
+      this.sprite.root.position.set(this.px * PX, this.py * PX + 2 + this.lane);
+    }
+  }
+
+  get bored(): boolean {
+    return this.travelled > 0 && this.visited.size / this.travelled < 0.5;
+  }
+}
+
+function pathHome(tracks: TrackNetwork, from: [number, number], to: [number, number]): [number, number][] | null {
+  const key = (p: [number, number]) => `${p[0]},${p[1]}`;
+  const prev = new Map<string, [number, number] | null>([[key(from), null]]);
+  const queue: [number, number][] = [from];
+  for (let i = 0; i < queue.length; i++) {
+    const cur = queue[i];
+    if (cur[0] === to[0] && cur[1] === to[1]) {
+      const path: [number, number][] = [];
+      for (let p: [number, number] | null = cur; p && key(p) !== key(from); p = prev.get(key(p))!) {
+        path.unshift(p);
+      }
+      return path;
+    }
+    for (const n of tracks.neighbours(...cur)) {
+      if (!prev.has(key(n))) {
+        prev.set(key(n), cur);
+        queue.push(n);
+      }
+    }
+  }
+  return null;
+}
+
+function componentOf(tracks: TrackNetwork, start: [number, number]): Set<string> {
+  const seen = new Set([`${start[0]},${start[1]}`]);
+  const queue = [start];
+  for (let i = 0; i < queue.length; i++) {
+    for (const n of tracks.neighbours(...queue[i])) {
+      const k = `${n[0]},${n[1]}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        queue.push(n);
+      }
+    }
+  }
+  return seen;
+}
+
+/** Stations, car parks and clusters of houses that skiers set out from. */
+export function findTrailheads(map: GameMap): Trailhead[] {
+  const heads: Trailhead[] = [];
+  for (const p of map.pois) {
+    if (p.kind === "station") {
+      heads.push({ kind: "station", name: `${p.name} stasjon`, x: p.x, y: p.y, rate: 9, reach: 5, entry: null, network: 0, today: 0 });
+    } else if (p.kind === "parking") {
+      heads.push({ kind: "parking", name: p.name ? `P ${p.name}` : "Parkering", x: p.x, y: p.y, rate: 8, reach: 4, entry: null, network: 0, today: 0 });
+    }
+  }
+  const cell = 10;
+  for (let cy = 0; cy < map.height; cy += cell) {
+    for (let cx = 0; cx < map.width; cx += cell) {
+      let n = 0;
+      let sx = 0;
+      let sy = 0;
+      for (let y = cy; y < Math.min(map.height, cy + cell); y++) {
+        for (let x = cx; x < Math.min(map.width, cx + cell); x++) {
+          if (map.has(x, y, Flag.Building)) {
+            n++;
+            sx += x;
+            sy += y;
+          }
+        }
+      }
+      if (n >= 6) {
+        const x = Math.round(sx / n);
+        const y = Math.round(sy / n);
+        const near = map.pois
+          .filter((p) => p.kind === "place" && p.name)
+          .sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0];
+        heads.push({ kind: "homes", name: near ? `boligfeltet ved ${near.name}` : "boligfeltet", x, y, rate: Math.min(6, n * 0.12), reach: 8, entry: null, network: 0, today: 0 });
+      }
+    }
+  }
+  return heads;
+}
+
+const MEMBERSHIP_FEE = 400;
+
+export interface DayStats {
+  skiers: number;
+  donations: number;
+  members: number;
+  satisfaction: number;
+  finished: number;
+}
+
+export class Crowd {
+  readonly layer = new Container();
+  readonly bubbles = new Container();
+  readonly trailheads: Trailhead[];
+  readonly skiers: Skier[] = [];
+  /** 0 … 1: what people say about the club's tracks. */
+  reputation = 0.5;
+  today: DayStats = { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0 };
+  private arrivals = new Map<Trailhead, number>();
+  private talk: { c: Container; ttl: number; skier: Skier }[] = [];
+  private popups: { t: Text; ttl: number }[] = [];
+
+  constructor(
+    private readonly map: GameMap,
+    private readonly earn: (amount: number) => void,
+  ) {
+    this.trailheads = findTrailheads(map);
+  }
+
+  /** Which trailheads have a track close enough to walk to, and how much track they lead to. */
+  connect(tracks: TrackNetwork) {
+    const sizes = new Map<string, number>();
+    for (const h of this.trailheads) {
+      h.entry = null;
+      h.network = 0;
+      let best = Infinity;
+      for (let dy = -h.reach; dy <= h.reach; dy++) {
+        for (let dx = -h.reach; dx <= h.reach; dx++) {
+          const d = Math.hypot(dx, dy);
+          if (d <= h.reach && d < best && tracks.has(h.x + dx, h.y + dy)) {
+            best = d;
+            h.entry = [h.x + dx, h.y + dy];
+          }
+        }
+      }
+      if (h.entry) {
+        const key = `${h.entry[0]},${h.entry[1]}`;
+        if (!sizes.has(key)) {
+          const component = componentOf(tracks, h.entry);
+          for (const k of component) {
+            sizes.set(k, component.size);
+          }
+        }
+        h.network = sizes.get(key)!;
+      }
+    }
+  }
+
+  /** How keen people are to go skiing right now, 0 … ~3. */
+  appetite(clock: GameClock, weather: Weather, tracks: TrackNetwork): number {
+    const day = clock.day;
+    const h = clock.hourOfDay;
+    const { sunrise, sunset } = sunTimes(day);
+    if (h < sunrise || h > sunset - 0.5) {
+      return 0;
+    }
+    const mid = (sunrise + sunset) / 2;
+    const daytime = Math.max(0, 1 - Math.pow((h - mid) / ((sunset - sunrise) / 2), 2));
+    const week = isWeekend(day) ? 1 : 0.35;
+    let sky = 1;
+    if (weather.precipRate > 0) {
+      sky = weather.temperature > 0.8 ? 0.12 : weather.precipRate > 1 ? 0.6 : 0.9;
+    } else {
+      sky = 1.25;
+    }
+    if (weather.temperature < -15) {
+      sky *= 0.5;
+    }
+    const km = (tracks.size * this.map.tileSize) / 1000;
+    const size = Math.min(2, 0.5 + km / 6);
+    return daytime * week * holiday(day).factor * sky * size * (0.3 + 1.4 * this.reputation);
+  }
+
+  update(hours: number, clock: GameClock, weather: Weather, tracks: TrackNetwork) {
+    if (hours <= 0) {
+      return;
+    }
+    const appetite = this.appetite(clock, weather, tracks);
+    const before = clock.hours - hours;
+    const trainArrived = Math.floor(before - 0.25) !== Math.floor(clock.hours - 0.25);
+    for (const h of this.trailheads) {
+      if (!h.entry || appetite <= 0) {
+        continue;
+      }
+      let n = 0;
+      if (h.kind === "station") {
+        n = trainArrived ? Math.round(h.rate * appetite * (0.6 + Math.random() * 0.8)) : 0;
+      } else {
+        const acc = (this.arrivals.get(h) ?? Math.random()) + h.rate * appetite * hours;
+        n = Math.floor(acc);
+        this.arrivals.set(h, acc - n);
+      }
+      for (let i = 0; i < n && this.skiers.length < 400; i++) {
+        this.spawn(h);
+      }
+    }
+
+    const say = (s: Skier, text: string) => this.say(s, text);
+    for (const s of this.skiers) {
+      s.update(hours, this.map, tracks, weather, say);
+    }
+    for (const s of this.skiers.filter((s) => s.done)) {
+      this.leave(s);
+    }
+  }
+
+  private spawn(h: Trailhead) {
+    const r = Math.random();
+    const kind = h.kind === "homes" ? (r < 0.55 ? KINDS.family : r < 0.92 ? KINDS.fitness : KINDS.racer)
+      : h.kind === "station" ? (r < 0.35 ? KINDS.family : r < 0.85 ? KINDS.fitness : KINDS.racer)
+      : r < 0.3 ? KINDS.family : r < 0.7 ? KINDS.fitness : KINDS.racer;
+    // Nobody plans a 10 km trip on a 500 m loop: the trip shrinks to what is on offer.
+    const wanted = kind.minTiles + Math.random() * (kind.maxTiles - kind.minTiles);
+    const goal = Math.max(10, Math.min(wanted, h.network * 1.6));
+    const skier = new Skier(kind, h.entry!, h, goal);
+    this.skiers.push(skier);
+    this.layer.addChild(skier.sprite.root);
+    h.today++;
+    this.today.skiers++;
+  }
+
+  private leave(s: Skier) {
+    this.skiers.splice(this.skiers.indexOf(s), 1);
+    s.sprite.root.destroy({ children: true });
+    this.talk = this.talk.filter((t) => {
+      if (t.skier === s) {
+        t.c.destroy({ children: true });
+        return false;
+      }
+      return true;
+    });
+    const donation = Math.round(s.kind.donation * s.satisfaction * (Math.random() < 0.6 ? 1 : 0));
+    this.reputation = Math.max(0.05, this.reputation + (s.satisfaction - this.reputation) * 0.004);
+    this.today.finished++;
+    this.today.satisfaction += s.satisfaction;
+    if (s.satisfaction > 0.6 && Math.random() < 0.03 * s.satisfaction) {
+      this.earn(MEMBERSHIP_FEE);
+      this.today.members++;
+      this.popup(`Nytt medlem! +${MEMBERSHIP_FEE} kr`, s.px * PX, s.py * PX - 14);
+    } else if (donation > 0) {
+      this.earn(donation);
+      this.today.donations += donation;
+      this.popup(`+${donation} kr`, s.px * PX, s.py * PX - 14);
+    } else if (s.bored && Math.random() < 0.3) {
+      this.popup(pick(COMPLAINTS.short), s.px * PX, s.py * PX - 14);
+    }
+  }
+
+  private say(s: Skier, text: string) {
+    if (this.talk.length > 6) {
+      return;
+    }
+    const t = new Text({
+      text,
+      style: { fontFamily: "system-ui, sans-serif", fontSize: 10, fontWeight: "600", fill: 0x23323d },
+      resolution: 3,
+    });
+    const w = t.width + 8;
+    const h = t.height + 4;
+    const c = new Container();
+    const g = new Graphics()
+      .roundRect(-w / 2, -h - 5, w, h, 4)
+      .moveTo(-3, -5.5)
+      .lineTo(0, 0)
+      .lineTo(3, -5.5)
+      .fill(0xffffff)
+      .roundRect(-w / 2, -h - 5, w, h, 4)
+      .stroke({ width: 1, color: 0x23323d });
+    t.position.set(-w / 2 + 4, -h - 3);
+    c.addChild(g, t);
+    this.bubbles.addChild(c);
+    this.talk.push({ c, ttl: 3, skier: s });
+  }
+
+  private popup(text: string, x: number, y: number) {
+    const t = new Text({
+      text,
+      style: { fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: "800", fill: 0x1f8a3a, stroke: { color: 0xffffff, width: 3 } },
+      resolution: 3,
+    });
+    t.anchor.set(0.5, 1);
+    t.position.set(x, y);
+    this.bubbles.addChild(t);
+    this.popups.push({ t, ttl: 1.6 });
+  }
+
+  /** Close the books for the day and start a fresh tally. */
+  endDay(): DayStats {
+    const stats = { ...this.today };
+    this.today = { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0 };
+    for (const h of this.trailheads) {
+      h.today = 0;
+    }
+    return stats;
+  }
+
+  animate(dt: number, detail: boolean) {
+    for (const s of this.skiers) {
+      s.animate(detail);
+    }
+    for (const t of this.talk) {
+      t.ttl -= dt;
+      t.c.position.set(t.skier.px * PX, t.skier.py * PX - 14);
+      t.c.alpha = Math.min(1, t.ttl * 3);
+      t.c.visible = detail;
+    }
+    for (const t of this.talk.filter((t) => t.ttl <= 0)) {
+      t.c.destroy({ children: true });
+    }
+    this.talk = this.talk.filter((t) => t.ttl > 0);
+    for (const p of this.popups) {
+      p.ttl -= dt;
+      p.t.y -= dt * 14;
+      p.t.alpha = Math.min(1, p.ttl * 2);
+      p.t.visible = detail;
+    }
+    for (const p of this.popups.filter((p) => p.ttl <= 0)) {
+      p.t.destroy();
+    }
+    this.popups = this.popups.filter((p) => p.ttl > 0);
+  }
+}
