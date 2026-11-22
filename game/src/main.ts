@@ -2,7 +2,9 @@ import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js
 import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, GameClock, SPEEDS } from "./clock";
 import { Fleet } from "./groomer";
-import { Crowd } from "./skiers";
+import { Report, writeReport } from "./report";
+import { Skijorer } from "./skijor";
+import { Crowd, DayStats } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
@@ -80,7 +82,8 @@ async function main() {
 
   const trackLayer = new Graphics();
   const trailheadLayer = new Container();
-  world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, fleet.machineLayer, crowd.layer);
+  const skijorer = new Skijorer(map);
+  world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, fleet.machineLayer, crowd.layer, skijorer.layer);
   const cursor = new Graphics();
   world.addChild(cursor);
   const whimsy = new Whimsy(map);
@@ -91,10 +94,9 @@ async function main() {
   const labels = new Container();
   world.addChild(labels);
   const signs = addPoiLabels(map, labels);
-  world.addChild(crowd.bubbles);
   const night = new Graphics();
   const lightsWorld = new Container();
-  lightsWorld.addChild(fleet.lights);
+  lightsWorld.addChild(crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
   const precipitation = new Precipitation();
   app.stage.addChild(night, lightsWorld, precipitation.layer);
   const ledger = {
@@ -110,11 +112,16 @@ async function main() {
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd } });
+    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, reports: () => reports } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
   let sinceRedraw = 0;
+  let snowSinceReport = 0;
+  let rainSinceReport = 0;
+  let lastReportDay = -1;
+  let yesterday: DayStats | null = null;
+  let yesterdayHyped = false;
   let sinceHud = 0;
   let forecastDay = -1;
   app.ticker.add((ticker) => {
@@ -122,9 +129,12 @@ async function main() {
     const hours = clock.tick(dt);
     if (hours > 0) {
       const { snow, rain } = weather.advance(clock.hours - hours, hours);
+      snowSinceReport += snow;
+      rainSinceReport += rain;
       tracks.applyWeather(hours, weather, snow, rain);
       fleet.update(hours, clock.hours, clock.hourOfDay, tracks, weather, ledger);
       crowd.update(hours, clock, weather, tracks);
+      skijorer.update(hours, clock, tracks);
       sinceRedraw += hours;
       if (sinceRedraw >= 0.25) {
         sinceRedraw = 0;
@@ -135,6 +145,10 @@ async function main() {
     if (sinceHud >= 0.25) {
       sinceHud = 0;
       refreshHud();
+    }
+    if (clock.day > lastReportDay && clock.hourOfDay >= 7 && clock.hourOfDay < 12 && tracks.size > 0) {
+      lastReportDay = clock.day;
+      publishReport();
     }
     if (clock.day !== forecastDay) {
       if (forecastDay >= 0) {
@@ -155,7 +169,8 @@ async function main() {
     detail.alpha = Math.max(0, Math.min(1, (s - 0.4) / 0.1));
     detail.visible = detail.alpha > 0;
     whimsy.detail = s >= OVERVIEW_BELOW;
-    crowd.animate(dt, s >= OVERVIEW_BELOW);
+    crowd.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight());
+    skijorer.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight(), crowd.lights);
     for (const { node, kind } of signs) {
       node.scale.set(s < 1 ? 1 / s : 1);
       node.visible = s >= OVERVIEW_BELOW || kind !== "parking";
@@ -177,6 +192,7 @@ async function main() {
     const top = `${topbar.offsetHeight + 8}px`;
     document.getElementById("forecast")!.style.top = top;
     document.getElementById("help")!.style.top = top;
+    document.getElementById("report")!.style.top = top;
   };
   new ResizeObserver(placePanels).observe(topbar);
   const fleetPanel = document.getElementById("fleet")!;
@@ -240,7 +256,9 @@ async function main() {
   };
 
   const closeDay = (day: number) => {
+    yesterdayHyped = crowd.hype;
     const stats = crowd.endDay();
+    yesterday = stats;
     const happy = stats.finished > 0 ? Math.round((stats.satisfaction / stats.finished) * 100) : 0;
     const diesel = dieselToday;
     dieselToday = 0;
@@ -251,6 +269,88 @@ async function main() {
       Vipps <span class="plus">+${kr(stats.donations)}</span>
       ${stats.members > 0 ? `· ${stats.members} nye medlemmer <span class="plus">+${kr(stats.members * 400)}</span>` : ""}
       · diesel <span class="minus">−${kr(diesel)}</span>`);
+  };
+
+  const reports: { report: Report; rosy: boolean }[] = [];
+  let reportIndex = -1;
+  const reportPanel = document.getElementById("report")!;
+  const reportButton = document.getElementById("report-button")!;
+
+  const showReport = (open: boolean) => {
+    reportPanel.hidden = !open;
+    if (open) {
+      reportButton.classList.remove("unread");
+      renderReport();
+    }
+  };
+
+  const renderReport = () => {
+    const entry = reports[reportIndex];
+    if (!entry) {
+      reportPanel.innerHTML = `<div class="bar"><strong>📰 Føremelding</strong><button data-r="close">✕</button></div>
+        <div class="body"><p>Første føremelding kommer kl. 07:00 når det finnes løyper.</p></div>`;
+      return;
+    }
+    const latest = reportIndex === reports.length - 1;
+    const editable = latest && entry.report.day === clock.day;
+    reportPanel.innerHTML = `
+      <div class="bar">
+        <button data-r="prev" ${reportIndex === 0 ? "disabled" : ""}>‹</button>
+        <strong>📰 Føremelding</strong>
+        <button data-r="next" ${latest ? "disabled" : ""}>›</button>
+        <button data-r="close">✕</button>
+      </div>
+      ${editable ? `<div class="tone">
+        <button data-r="honest" class="${entry.rosy ? "" : "active"}">Ærlig</button>
+        <button data-r="rosy" class="${entry.rosy ? "active" : ""}">Pynt på den ✨</button>
+        <span>${entry.rosy ? "Flere kommer, men skuffer du dem, svir det." : "Det som står, stemmer."}</span>
+      </div>` : ""}
+      <div class="body">${entry.rosy ? entry.report.rosy : entry.report.honest}</div>`;
+  };
+
+  reportPanel.addEventListener("click", (e) => {
+    const action = (e.target as HTMLElement).closest("button")?.dataset.r;
+    const entry = reports[reportIndex];
+    if (action === "close") {
+      showReport(false);
+    } else if (action === "prev") {
+      reportIndex = Math.max(0, reportIndex - 1);
+    } else if (action === "next") {
+      reportIndex = Math.min(reports.length - 1, reportIndex + 1);
+    } else if ((action === "honest" || action === "rosy") && entry) {
+      entry.rosy = action === "rosy";
+      crowd.hype = entry.rosy;
+    }
+    if (!reportPanel.hidden) {
+      renderReport();
+    }
+  });
+  reportButton.addEventListener("click", () => showReport(reportPanel.hidden));
+
+  const publishReport = () => {
+    const report = writeReport({
+      day: clock.day,
+      now: clock.hours,
+      map,
+      tracks,
+      weather,
+      hasMachine: fleet.groomers.length > 0,
+      snowSinceLast: snowSinceReport,
+      rainSinceLast: rainSinceReport,
+      yesterday,
+      yesterdayHyped,
+    });
+    snowSinceReport = 0;
+    rainSinceReport = 0;
+    reports.push({ report, rosy: false });
+    reportIndex = reports.length - 1;
+    if (reports.length === 1) {
+      showReport(true);
+    } else if (reportPanel.hidden) {
+      reportButton.classList.add("unread");
+    } else {
+      renderReport();
+    }
   };
 
   let trailheadSignature = "";
@@ -379,7 +479,7 @@ async function main() {
   app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   app.canvas.addEventListener("pointerdown", (e) => {
     const w = world.toLocal({ x: e.offsetX, y: e.offsetY });
-    if (e.button === 0 && whimsy.poke(w.x, w.y)) {
+    if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
       return;
     }
     if (e.button === 0 && tool === "look") {
@@ -567,10 +667,13 @@ async function main() {
       setSpeed(clock.speedIndex - 1);
     } else if (e.code === "KeyN") {
       toggleSnow();
+    } else if (e.code === "KeyF") {
+      showReport(reportPanel.hidden);
     } else if (e.code === "KeyH" || e.key === "?") {
       help.hidden = !help.hidden;
     } else if (e.code === "Escape") {
       help.hidden = true;
+      showReport(false);
     } else {
       const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage" } as Record<string, Tool>)[e.code];
       if (!t) {

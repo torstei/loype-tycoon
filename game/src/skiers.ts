@@ -59,6 +59,11 @@ function pick<T>(xs: T[]): T {
 const PANTS = 0x23323d;
 const SKIN = 0xf2c9a0;
 
+export interface Looks {
+  beard?: number;
+  poles?: boolean;
+}
+
 function stick(length: number, width: number, colour: number): Graphics {
   return new Graphics().moveTo(0, 0).lineTo(0, length).stroke({ width, color: colour, cap: "round" });
 }
@@ -70,9 +75,13 @@ class SideFigure {
   private readonly arms: Graphics[];
   private readonly poles = [0, 1].map(() => stick(8, 0.6, 0x55606b));
 
-  constructor(jacket: number, hat: number) {
+  constructor(jacket: number, hat: number, looks: Looks) {
     this.arms = [0, 1].map(() => stick(3.2, 1.2, jacket));
     const body = new Container();
+    const beard = new Graphics();
+    if (looks.beard !== undefined) {
+      beard.poly([0.2, -5.2, 2.3, -5.4, 1.6, -3.4, 0.6, -3.8]).fill(looks.beard);
+    }
     body.addChild(
       new Graphics().roundRect(-1.4, -4.2, 2.8, 4.6, 1.2).fill(jacket).stroke({ width: 0.6, color: 0x1d1d22 }),
       new Graphics()
@@ -83,6 +92,7 @@ class SideFigure {
         .fill(hat)
         .circle(0.6, -8.4, 0.7)
         .fill(0xffffff),
+      beard,
     );
     body.position.set(0, -5);
     body.rotation = 0.25;
@@ -90,6 +100,7 @@ class SideFigure {
     for (const arm of this.arms) arm.position.set(0.4, -8.8);
     for (const pole of this.poles) pole.position.set(0.4, -8.8);
     this.root.addChild(this.poles[1], this.arms[1], this.legs[1], this.legs[0], body, this.arms[0], this.poles[0]);
+    for (const pole of this.poles) pole.visible = looks.poles !== false;
   }
 
   pose(s: number) {
@@ -109,13 +120,16 @@ class EndFigure {
   private readonly arms: Graphics[];
   private readonly poles = [0, 1].map(() => new Graphics());
 
-  constructor(jacket: number, hat: number, front: boolean) {
+  constructor(jacket: number, hat: number, front: boolean, looks: Looks) {
     this.arms = [0, 1].map(() => stick(3.2, 1.2, jacket));
     this.legs.forEach((leg, i) => leg.position.set(i === 0 ? -0.9 : 0.9, -5));
     this.arms.forEach((arm, i) => arm.position.set(i === 0 ? -1.7 : 1.7, -8.6));
     const head = new Graphics().circle(0, -10.4, 1.5).fill(front ? SKIN : 0x6b4a2f).stroke({ width: 0.5, color: 0x5a3c25 });
     if (front) {
       head.circle(-0.55, -10.5, 0.25).circle(0.55, -10.5, 0.25).fill(0x23323d);
+      if (looks.beard !== undefined) {
+        head.poly([-1.4, -10, 1.4, -10, 0.9, -8.1, 0, -7.6, -0.9, -8.1]).fill(looks.beard);
+      }
     }
     head.poly([-1.6, -11, 0, -13, 1.6, -11]).fill(hat).circle(0, -13.2, 0.7).fill(0xffffff);
     const torso = new Graphics().roundRect(-1.7, -9.2, 3.4, 4.6, 1.2).fill(jacket).stroke({ width: 0.6, color: 0x1d1d22 });
@@ -123,6 +137,7 @@ class EndFigure {
       torso.roundRect(-1.1, -8.6, 2.2, 2.4, 0.6).fill({ color: 0x000000, alpha: 0.18 });
     }
     this.root.addChild(...this.poles, ...this.legs, torso, ...this.arms, head);
+    for (const pole of this.poles) pole.visible = looks.poles !== false;
   }
 
   pose(s: number) {
@@ -143,7 +158,7 @@ class EndFigure {
  * A little cross-country skier in diagonal stride. Skis and shadow lie on the ground and
  * turn with the track; the upright figure shows its side, front or back depending on heading.
  */
-class SkierSprite {
+export class SkierSprite {
   readonly root = new Container();
   private readonly ground = new Container();
   private readonly skis = [0, 1].map(() => new Graphics().roundRect(-4.5, -0.55, 9, 1.1, 0.5).fill(0x3b2a20));
@@ -152,11 +167,11 @@ class SkierSprite {
   private readonly back: EndFigure;
   private readonly upright = new Container();
 
-  constructor(jacket: number, hat: number, scale: number) {
+  constructor(jacket: number, hat: number, scale: number, looks: Looks = {}) {
     this.ground.addChild(new Graphics().ellipse(0, 0, 5, 1.6).fill({ color: 0x3c548c, alpha: 0.22 }), ...this.skis);
-    this.side = new SideFigure(jacket, hat);
-    this.front = new EndFigure(jacket, hat, true);
-    this.back = new EndFigure(jacket, hat, false);
+    this.side = new SideFigure(jacket, hat, looks);
+    this.front = new EndFigure(jacket, hat, true, looks);
+    this.back = new EndFigure(jacket, hat, false, looks);
     this.upright.addChild(this.side.root, this.front.root, this.back.root);
     this.root.addChild(this.ground, this.upright);
     this.root.scale.set(scale);
@@ -326,6 +341,22 @@ class Skier {
     this.sprite.root.position.set(this.px * PX + nx, this.py * PX + 2 + ny);
   }
 
+  /** A beam on the snow ahead and the lamp itself, drawn above the night overlay. */
+  drawHeadlamp(g: Graphics, darkness: number) {
+    const { x, y } = this.sprite.root.position;
+    const a = this.shownHeading;
+    const reach = 32;
+    const spread = 0.38;
+    g.moveTo(x + Math.cos(a) * 3, y + Math.sin(a) * 3)
+      .lineTo(x + Math.cos(a - spread) * reach, y + Math.sin(a - spread) * reach)
+      .lineTo(x + Math.cos(a + spread) * reach, y + Math.sin(a + spread) * reach)
+      .closePath()
+      .fill({ color: 0xfff4c8, alpha: 0.3 * darkness });
+    const headY = y - (Math.abs(Math.cos(a)) >= 0.42 ? 11 : 12.5) * this.kind.scale;
+    g.circle(x, headY, 3.5).fill({ color: 0xfff4c8, alpha: 0.25 * darkness });
+    g.circle(x, headY, 1.2).fill({ color: 0xfffbe8, alpha: darkness });
+  }
+
   get bored(): boolean {
     return this.travelled > 0 && this.visited.size / this.travelled < 0.5;
   }
@@ -424,6 +455,10 @@ export class Crowd {
   readonly skiers: Skier[] = [];
   /** 0 … 1: what people say about the club's tracks. */
   reputation = 0.5;
+  /** The day's føremelding promised more than the tracks could deliver. */
+  hype = false;
+  readonly lights = new Graphics();
+  private darkShare = 0;
   today: DayStats = { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0 };
   private arrivals = new Map<Trailhead, number>();
   private talk: { c: Container; ttl: number; skier: Skier }[] = [];
@@ -470,12 +505,16 @@ export class Crowd {
     const day = clock.day;
     const h = clock.hourOfDay;
     const { sunrise, sunset } = sunTimes(day);
-    if (h < sunrise || h > sunset - 0.5) {
-      return 0;
-    }
+    const weekend = isWeekend(day);
     const mid = (sunrise + sunset) / 2;
-    const daytime = Math.max(0, 1 - Math.pow((h - mid) / ((sunset - sunrise) / 2), 2));
-    const week = isWeekend(day) ? 1 : 0.35;
+    const bell = (centre: number, half: number) => Math.max(0, 1 - Math.pow((h - centre) / half, 2));
+    const daytime = h < sunrise || h > sunset - 0.5 ? 0 : bell(mid, (sunset - sunrise) / 2) * (weekend ? 1 : 0.35);
+    // After work, and a few before it: headlamp skiing.
+    const evening = bell(18.75, 2.75) * (weekend ? 0.12 : 0.3);
+    const early = h < sunrise ? bell(7, 1.3) * (weekend ? 0 : 0.12) : 0;
+    const dark = h < sunrise || h > sunset;
+    const out = daytime + (dark ? evening + early : 0);
+    this.darkShare = out > 0 ? (dark ? 1 : 0) : 0;
     let sky = 1;
     if (weather.precipRate > 0) {
       sky = weather.temperature > 0.8 ? 0.12 : weather.precipRate > 1 ? 0.6 : 0.9;
@@ -487,7 +526,7 @@ export class Crowd {
     }
     const km = (tracks.size * this.map.tileSize) / 1000;
     const size = Math.min(2, 0.5 + km / 6);
-    return daytime * week * holiday(day).factor * sky * size * (0.3 + 1.4 * this.reputation);
+    return out * holiday(day).factor * sky * size * (0.3 + 1.4 * this.reputation) * (this.hype ? 1.25 : 1);
   }
 
   update(hours: number, clock: GameClock, weather: Weather, tracks: TrackNetwork) {
@@ -525,7 +564,8 @@ export class Crowd {
 
   private spawn(h: Trailhead) {
     const r = Math.random();
-    const kind = h.kind === "homes" ? (r < 0.55 ? KINDS.family : r < 0.92 ? KINDS.fitness : KINDS.racer)
+    const kind = this.darkShare > 0 ? (r < 0.08 ? KINDS.family : r < 0.75 ? KINDS.fitness : KINDS.racer)
+      : h.kind === "homes" ? (r < 0.55 ? KINDS.family : r < 0.92 ? KINDS.fitness : KINDS.racer)
       : h.kind === "station" ? (r < 0.35 ? KINDS.family : r < 0.85 ? KINDS.fitness : KINDS.racer)
       : r < 0.3 ? KINDS.family : r < 0.7 ? KINDS.fitness : KINDS.racer;
     // Nobody plans a 10 km trip on a 500 m loop: the trip shrinks to what is on offer.
@@ -548,6 +588,9 @@ export class Crowd {
       }
       return true;
     });
+    if (this.hype && s.satisfaction < 0.7) {
+      s.satisfaction *= 0.75;
+    }
     const donation = Math.round(s.kind.donation * s.satisfaction * (Math.random() < 0.6 ? 1 : 0));
     this.reputation = Math.max(0.05, this.reputation + (s.satisfaction - this.reputation) * 0.004);
     this.today.finished++;
@@ -607,15 +650,20 @@ export class Crowd {
   endDay(): DayStats {
     const stats = { ...this.today };
     this.today = { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0 };
+    this.hype = false;
     for (const h of this.trailheads) {
       h.today = 0;
     }
     return stats;
   }
 
-  animate(dt: number, detail: boolean) {
+  animate(dt: number, detail: boolean, darkness: number) {
+    this.lights.clear();
     for (const s of this.skiers) {
       s.animate(dt, detail);
+      if (detail && darkness > 0.15) {
+        s.drawHeadlamp(this.lights, darkness);
+      }
     }
     for (const t of this.talk) {
       t.ttl -= dt;

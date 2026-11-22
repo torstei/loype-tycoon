@@ -383,6 +383,8 @@ class Train {
 
 export class Whimsy {
   readonly layer = new Container();
+  /** Speech bubbles; the caller puts them above the night overlay so they stay readable. */
+  readonly bubbleLayer = new Container();
   private readonly smoke = new Graphics();
   private readonly bubbles: Bubbles;
   readonly moose: Moose[] = [];
@@ -392,8 +394,7 @@ export class Whimsy {
   detail = true;
 
   constructor(private readonly map: GameMap) {
-    const bubbleLayer = new Container();
-    this.bubbles = new Bubbles(bubbleLayer);
+    this.bubbles = new Bubbles(this.bubbleLayer);
 
     const path = railPath(map);
     const stations = map.pois.filter((p) => p.kind === "station").map((p) => ({ x: (p.x + 0.5) * PX, y: (p.y + 0.5) * PX }));
@@ -426,7 +427,6 @@ export class Whimsy {
     if (this.train) {
       this.layer.addChild(this.train.sprite);
     }
-    this.layer.addChild(bubbleLayer);
   }
 
   /** Clicking a moose makes it talk. Returns true when the click landed on one. */

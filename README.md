@@ -45,6 +45,18 @@ home Vipps a donation or join as members according to how happy they were. Their
 satisfaction moves the reputation. Each day ends with a summary of skiers, income and
 diesel.
 
+After dark the keen ones still come — weekday evenings especially — with headlamps
+lighting the snow ahead of them.
+
+Every morning at 07:00 the club publishes a **føremelding** (`F`, or the 📰 button): which
+areas were groomed overnight, how each area is, warnings, snow depth, the forecast, a wax
+recommendation and what the local Facebook group made of yesterday. The day's report can be
+made rosier (“Pynt på den ✨”): more skiers come, but if the tracks disappoint them it costs
+more satisfaction and reputation, and the Facebook group will remember.
+
+Early in the morning and late in the evening, a red-bearded man skijors through the valley
+with his two huskies, Manu and Nanook. Click them.
+
 Weather is generated per season: temperature with a seasonal curve, fronts and daily
 swings, snow and rain, and a snowpack that is deeper higher up. Each track tile tracks
 how fresh it is, how much new snow lies in it and how icy it is; tracks are drawn by
