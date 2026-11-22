@@ -369,12 +369,29 @@ async function main() {
   const refreshTrailheads = () => {
     crowd.connect(tracks);
     const connected = crowd.trailheads.filter((h) => h.entry);
-    const signature = connected.map((h) => `${h.x},${h.y}`).join(";");
+    const starting = tracks.size === 0;
+    const signature = starting ? "start" : connected.map((h) => `${h.x},${h.y}`).join(";");
     if (signature === trailheadSignature) {
       return;
     }
     trailheadSignature = signature;
     trailheadLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    if (starting) {
+      for (const h of crowd.trailheads) {
+        const g = new Graphics()
+          .circle((h.x + 0.5) * PX, (h.y + 0.5) * PX, h.reach * PX)
+          .fill({ color: 0x1f8a3a, alpha: 0.08 })
+          .stroke({ width: 1.5, color: 0x1f8a3a, alpha: 0.5 })
+          .circle((h.x + 0.5) * PX, (h.y + 0.5) * PX, 6)
+          .fill(0x8fa3bf)
+          .stroke({ width: 1.5, color: 0xffffff });
+        const icon = new Text({ text: "⛷", style: { fontSize: 8, fill: 0xffffff }, resolution: 4 });
+        icon.anchor.set(0.5);
+        icon.position.set((h.x + 0.5) * PX, (h.y + 0.5) * PX);
+        trailheadLayer.addChild(g, icon);
+      }
+      return;
+    }
     for (const h of connected) {
       const [ex, ey] = h.entry!;
       const g = new Graphics()
@@ -530,7 +547,10 @@ async function main() {
     const elevation = map.elevationAt(x, y);
     const i = map.index(x, y);
     const obstacle = tracks.obstacle(x, y);
-    let action = cost === null
+    const detached = cost !== null && !tracks.has(x, y) ? connectionProblem(x, y) : null;
+    let action = detached
+      ? `<span class="minus">${detached}</span>`
+      : cost === null
       ? "Kan ikke bygge her"
       : obstacle === "rail"
         ? `Jernbane: krever undergang (fra ${kr(cost + 120_000)})`
@@ -562,7 +582,8 @@ async function main() {
       ${elevation} moh · stigning ${map.slopeAt(x, y).toFixed(0)} % ·
       ${weather.localTemperature(elevation).toFixed(0)} °C · snø ${weather.snowDepthAt(elevation).toFixed(0)} cm<br>
       ${action}${headLine}`;
-    cursor.clear().rect(x * PX, y * PX, PX, PX).stroke({ width: 2, color: cost === null ? 0xc0392b : 0x1f5fd1 });
+    const blocked = cost === null || (!tracks.has(x, y) && connectionProblem(x, y) !== null);
+    cursor.clear().rect(x * PX, y * PX, PX, PX).stroke({ width: 2, color: blocked ? 0xc0392b : 0x1f5fd1 });
   };
 
   /**
@@ -575,6 +596,18 @@ async function main() {
   type BuildResult = { status: "built" | "exists" | "blocked" | "asked"; paid: number; reason?: string };
 
   /** Build one track tile, asking how to cross first if it lies on a road or the railway. */
+  /**
+   * As in the old tycoon games, new track must grow out of the network; the very first track
+   * starts where skiers can reach it. Null when building here is allowed.
+   */
+  const connectionProblem = (x: number, y: number): string | null => {
+    if (tracks.size === 0) {
+      const nearHead = crowd.trailheads.some((h) => Math.hypot(h.x - x, h.y - y) <= h.reach);
+      return nearHead ? null : "Første løype må starte ved en stasjon, parkering eller et boligfelt";
+    }
+    return tracks.neighbours(x, y).length > 0 ? null : "Ny løype må bygges videre fra løypenettet";
+  };
+
   const build = (x: number, y: number, afterAsk: () => void): BuildResult => {
     if (tracks.has(x, y)) {
       return { status: "exists", paid: 0 };
@@ -582,6 +615,10 @@ async function main() {
     const ground = tracks.cost(x, y);
     if (ground === null) {
       return { status: "blocked", paid: 0, reason: "Kan ikke bygge her" };
+    }
+    const unconnected = connectionProblem(x, y);
+    if (unconnected) {
+      return { status: "blocked", paid: 0, reason: unconnected };
     }
     const obstacle = tracks.obstacle(x, y);
     if (!obstacle) {
@@ -772,7 +809,8 @@ async function main() {
       followCrew();
     };
     if (crew.building) {
-      const tiles: [number, number][] = tracks.cost(crew.x, crew.y) !== null ? [[crew.x, crew.y], [nx, ny]] : [[nx, ny]];
+      const hereOk = tracks.has(crew.x, crew.y) || (tracks.cost(crew.x, crew.y) !== null && !connectionProblem(crew.x, crew.y));
+      const tiles: [number, number][] = hereOk ? [[crew.x, crew.y], [nx, ny]] : [[nx, ny]];
       for (const [tx, ty] of tiles) {
         const isNext = tx === nx && ty === ny;
         const result = build(tx, ty, () => {
@@ -788,7 +826,7 @@ async function main() {
         if (result.status === "blocked") {
           crew.refuse();
           describe(nx, ny);
-          if (tracks.cost(nx, ny) !== null) {
+          if (result.reason?.startsWith("Ikke råd")) {
             info.innerHTML += `<br><strong class="warn">${result.reason}</strong>`;
           }
           return;
@@ -881,6 +919,7 @@ async function main() {
     e.preventDefault();
   });
 
+  redrawTracks();
   refreshHud();
 }
 

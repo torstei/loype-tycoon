@@ -22,6 +22,10 @@ npm run dev
 
 Controls (press `H` in the game for the full list):
 
+- **Track grows from the network**, as in the old tycoon games: the first track has to start
+  within reach of a station, car park or residential area (shown on the map before you
+  build), and every new piece after that has to connect to track you already have. Track can
+  be removed anywhere, which saves grooming diesel on stretches nobody uses.
 - **Keyboard track laying**, as in the old tycoon games: Num Lock or `T` toggles
   tråkkemodus; numpad 1–9, or Q W E / A D / Z X C on keyboards without a numpad, walk the
   track crew in eight directions, laying track when tråkkemodus is on. Backspace removes
