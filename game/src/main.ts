@@ -5,6 +5,7 @@ import { Fleet, GARAGE_REACH } from "./groomer";
 import { areas, Report, writeReport } from "./report";
 import { Kiosk, KIOSK_TIERS } from "./kiosk";
 import { waitForTouchChoice } from "./mobile";
+import { showStartupError, watchForStaleBuild } from "./startup";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
 import {
   decodeTracks,
@@ -1837,6 +1838,5 @@ function signboard(
   return sign;
 }
 
-main().catch((err) => {
-  document.body.textContent = `Klarte ikke å starte: ${err}`;
-});
+watchForStaleBuild();
+main().catch(showStartupError);

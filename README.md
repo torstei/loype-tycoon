@@ -180,7 +180,9 @@ browser session.
 
 The game is published at https://torstei.github.io/loype-tycoon/. Changes reach `main` through
 pull requests; each pull request is built by `.github/workflows/pages.yml`, and every push to
-`main` builds and deploys the site with GitHub Pages.
+`main` builds and deploys the site with GitHub Pages. A deploy replaces every file, so a browser still holding the
+previous version can ask for pieces that are gone; the page then reloads once by itself, and
+if that does not help it shows a message with a reload button instead of a bare error.
 
 ## Data
 
