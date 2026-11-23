@@ -103,6 +103,9 @@ LANDCOVER_RULES = [
 
 # Bits 8–9 of the flags: how busy a road on the tile is, 0 (none) … 3 (trunk road).
 TRAFFIC_SHIFT = 8
+
+# Bit 10: a railway tile where a road or path crosses on the same level (planovergang).
+LEVEL_CROSSING = 1 << 10
 TRAFFIC = {
     "motorway": 3, "trunk": 3, "primary": 3, "motorway_link": 3, "trunk_link": 3, "primary_link": 3,
     "secondary": 2, "tertiary": 2, "secondary_link": 2, "tertiary_link": 2,
@@ -231,6 +234,8 @@ def build_layers(region, osm):
     lines = {f: [] for f in (ROAD, FOREST_ROAD, RAIL, PATH, STREAM, PISTE)}
     buildings = []
     passages = []
+    at_grade_rails = []
+    at_grade_ways = []
     traffic = {1: [], 2: [], 3: []}
     road_names = []
     pois = []
@@ -265,6 +270,11 @@ def build_layers(region, osm):
         if carries_traffic and (bridge or tunnel):
             # Where something crosses another line on its own level, ski track can get across too.
             passages.append(utm(way_line(el)))
+        if not (bridge or tunnel) and el.get("geometry") and len(el["geometry"]) > 1:
+            if tags.get("railway") == "rail":
+                at_grade_rails.append(utm(way_line(el)))
+            elif hw is not None:
+                at_grade_ways.append(utm(way_line(el)))
         if carries_traffic and tunnel:
             pass
         elif hw in MAJOR_HIGHWAYS:
@@ -316,8 +326,28 @@ def build_layers(region, osm):
         mask = rasterize(geoms, out_shape=shape, transform=transform, fill=0, default_value=1, all_touched=True)
         flags[mask == 1] |= PASSAGE
 
+    for x, y in level_crossings(at_grade_rails, at_grade_ways):
+        col = int((x - region.min_x) // GRID_M)
+        row = int((region.max_y - y) // GRID_M)
+        for r in range(row - 1, row + 2):
+            for c in range(col - 1, col + 2):
+                if 0 <= r < shape[0] and 0 <= c < shape[1] and flags[r, c] & RAIL:
+                    flags[r, c] |= LEVEL_CROSSING
+
     pois = [p for p in pois if p is not None]
     return terrain, flags, pois, vector_lines(region, lines) + named_roads(region, road_names)
+
+
+def level_crossings(rails, ways):
+    """Points where a road or path meets the railway on the same level, with neither on a bridge or in a tunnel."""
+    rail = unary_union([g for g in rails if not g.is_empty])
+    points = []
+    for way in ways:
+        if way.is_empty or not way.intersects(rail):
+            continue
+        hit = way.intersection(rail)
+        points += [(p.x, p.y) for p in getattr(hit, "geoms", [hit]) if p.geom_type == "Point"]
+    return points
 
 
 def road_label(tags):

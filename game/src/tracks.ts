@@ -78,14 +78,31 @@ export const ROAD_TRAFFIC: Record<1 | 2 | 3, RoadTraffic> = {
   },
 };
 
+/** A planovergang: the barriers come down for every train, for skiers and snowcat alike. */
+export const RAIL_LEVEL_CROSSING: RoadTraffic = {
+  describe: "Planovergang med bommer. Toget kommer når det kommer.",
+  levelPrice: 2_500,
+  levelNote: "Bommen går ned for hvert tog. Skiløperne venter, Gunnar venter, og maskina kan ikke preppe skinner.",
+  structureFactor: 1,
+  skierPenalty: 0.85,
+  skierWait: 0.15,
+  groomerWait: 0.15,
+  incident: 0,
+};
+
 export function roadTraffic(level: number): RoadTraffic {
   return ROAD_TRAFFIC[Math.max(1, Math.min(3, level)) as 1 | 2 | 3];
 }
 
-export function crossingOptions(obstacle: Obstacle, traffic: number): CrossingOption[] {
+export function crossingOptions(obstacle: Obstacle, traffic: number, levelCrossing = false): CrossingOption[] {
   if (obstacle === "rail") {
+    const underpass = { type: Crossing.Underpass, name: "Undergang under jernbanen", price: 120_000, note: "Jernbaneeieren krever betong, sikring og tre skjemaer i trippel." };
+    if (!levelCrossing) {
+      return [{ ...underpass, note: `Det eneste lovlige. ${underpass.note}` }];
+    }
     return [
-      { type: Crossing.Underpass, name: "Undergang under jernbanen", price: 120_000, note: "Det eneste lovlige. Jernbaneeieren krever betong, sikring og tre skjemaer i trippel." },
+      { type: Crossing.AtGrade, name: "Over planovergangen", price: RAIL_LEVEL_CROSSING.levelPrice, note: RAIL_LEVEL_CROSSING.levelNote },
+      underpass,
     ];
   }
   const t = roadTraffic(traffic);
@@ -99,7 +116,7 @@ export function crossingOptions(obstacle: Obstacle, traffic: number): CrossingOp
 
 export const CROSSING_NAMES: Record<Crossing, string> = {
   [Crossing.None]: "",
-  [Crossing.AtGrade]: "rett over veien",
+  [Crossing.AtGrade]: "rett over veien eller skinnene",
   [Crossing.Culvert]: "kulvert under veien",
   [Crossing.Bridge]: "skibru over veien",
   [Crossing.Existing]: "eksisterende bru/undergang",
@@ -162,6 +179,33 @@ export class TrackNetwork {
   }
 
   /** What has to be crossed here, or null if the tile is open ground or already has a passage. */
+  /**
+   * Roads and forest roads are built to be driven, so the snowcat follows them whatever the
+   * terrain beside them does; at 25 m a road in a cutting looks like a cliff.
+   */
+  graded(x: number, y: number): boolean {
+    return this.map.has(x, y, Flag.Road) || this.map.has(x, y, Flag.ForestRoad);
+  }
+
+  /** A planovergang: the one place the railway may be crossed on the level. */
+  levelCrossing(x: number, y: number): boolean {
+    return this.map.inside(x, y) && this.map.has(x, y, Flag.LevelCrossing);
+  }
+
+  /** A bridge or underpass that carries a road: track there has to share the asphalt. */
+  passageOnRoad(x: number, y: number): boolean {
+    return this.map.inside(x, y) && this.map.has(x, y, Flag.Passage) && this.map.has(x, y, Flag.Road);
+  }
+
+  /** What an at-grade crossing here does to skiers and snowcats, taking the busiest road of the crossing. */
+  atGradeTraffic(x: number, y: number): RoadTraffic {
+    if (this.map.has(x, y, Flag.Rail) && !this.map.has(x, y, Flag.Passage)) {
+      return RAIL_LEVEL_CROSSING;
+    }
+    const atGrade = ([nx, ny]: [number, number]) => this.crossing[this.index(nx, ny)] === Crossing.AtGrade;
+    return roadTraffic(Math.max(this.traffic(x, y), ...this.neighbours(x, y).filter(atGrade).map(([nx, ny]) => this.traffic(nx, ny))));
+  }
+
   obstacle(x: number, y: number): Obstacle | null {
     if (!this.map.inside(x, y) || this.map.has(x, y, Flag.Passage)) {
       return null;
@@ -185,10 +229,11 @@ export class TrackNetwork {
       return null;
     }
     const slope = this.map.slopeAt(x, y);
-    if (slope > MAX_SLOPE) {
+    if (slope > MAX_SLOPE && !this.graded(x, y)) {
       return null;
     }
-    return Math.round(base * (1 + slope / 8));
+    const road = this.passageOnRoad(x, y) ? roadTraffic(this.traffic(x, y)).levelPrice : 0;
+    return Math.round(base * (1 + Math.min(slope, MAX_SLOPE) / 8)) + road;
   }
 
   /** Why track cannot be built here, in words for the player; null where cost() allows it. */
@@ -203,7 +248,7 @@ export class TrackNetwork {
     if (BUILD_COST[this.map.terrainAt(x, y)] === null && !corridor) {
       return "Tettbebyggelse: hager, innkjørsler og naboer som klager";
     }
-    if (this.map.slopeAt(x, y) > MAX_SLOPE) {
+    if (this.map.slopeAt(x, y) > MAX_SLOPE && !this.graded(x, y)) {
       return `For bratt (${Math.round(this.map.slopeAt(x, y))} %) — løypemaskina klarer maks ${MAX_SLOPE} %`;
     }
     return null;
@@ -212,8 +257,9 @@ export class TrackNetwork {
   add(x: number, y: number, crossing = Crossing.None) {
     const i = this.map.index(x, y);
     this.tiles.add(i);
-    const existing = this.map.has(x, y, Flag.Passage) && (this.map.has(x, y, Flag.Rail) || this.map.has(x, y, Flag.Road));
-    this.crossing[i] = existing ? Crossing.Existing : crossing;
+    const passage = this.map.has(x, y, Flag.Passage) && (this.map.has(x, y, Flag.Rail) || this.map.has(x, y, Flag.Road));
+    // Through an existing bridge or underpass the track either has the structure to itself or shares the road on it.
+    this.crossing[i] = !passage ? crossing : this.passageOnRoad(x, y) ? Crossing.AtGrade : Crossing.Existing;
     // A new track is just a line of footprints until a groomer has been along.
     this.fresh[i] = 0.35;
     this.newSnow[i] = 0;

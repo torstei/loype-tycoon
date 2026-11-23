@@ -20,6 +20,8 @@ export enum Flag {
   Building = 1 << 6,
   /** A bridge or underpass already carries something across on its own level. */
   Passage = 1 << 7,
+  /** A railway tile where a road or path crosses on the same level: a planovergang with barriers. */
+  LevelCrossing = 1 << 10,
 }
 
 export const TERRAIN_NAMES: Record<Terrain, string> = {

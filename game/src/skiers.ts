@@ -3,7 +3,7 @@ import { GameClock, holiday, isWeekend, sunTimes } from "./clock";
 import { GameMap } from "./map";
 import { PX } from "./render";
 import { Flag } from "./terrain";
-import { Crossing, roadTraffic, TrackNetwork } from "./tracks";
+import { Crossing, RAIL_LEVEL_CROSSING, roadTraffic, TrackNetwork } from "./tracks";
 import { Weather } from "./weather";
 
 export type TrailheadKind = "station" | "parking" | "homes";
@@ -52,6 +52,7 @@ const COMPLAINTS = {
   short: ["Var det alt?", "Rundt og rundt og rundt…"],
   road: ["Ta av skiene, ta på skiene…", "Bilene stopper ikke for skiløpere!", "Hvem legger løype over en bilvei?", "Asfalt. Mine stakkars ski."],
   moose: ["Elgen har vært her igjen!", "Hull i sporet. Takk, elg.", "Klassisk spor med elgmønster.", "Noen bør snakke med den elgen."],
+  rail: ["Bommen er nede. Igjen.", "Ti minutter for ett godstog!", "Planovergang med ski på beina. Det er sånt man forteller barnebarna om.", "Toget var forsinket, så nå venter vi på det også."],
   trunk: ["Et vogntog! Et VOGNTOG!", "Jeg har stått her i ti minutter!", "Hvem fant på å legge løypa over Rv. 4?!", "Livet passerte revy. To ganger."],
 };
 
@@ -284,13 +285,14 @@ class Skier {
     const atGrade = (t: [number, number] | null) => !!t && tracks.crossing[map.index(t[0], t[1])] === Crossing.AtGrade;
     // Penalties and waiting apply once per crossing, not once per tile of road width.
     if (atGrade([x, y]) && !atGrade(this.previous)) {
-      const level = Math.max(tracks.traffic(x, y), ...tracks.neighbours(x, y).filter(atGrade).map(([nx, ny]) => tracks.traffic(nx, ny)));
-      const traffic = roadTraffic(level);
+      const traffic = tracks.atGradeTraffic(x, y);
+      const rail = traffic === RAIL_LEVEL_CROSSING;
+      const level = rail ? 2 : traffic === roadTraffic(3) ? 3 : traffic === roadTraffic(2) ? 2 : 1;
       this.roadMood *= traffic.skierPenalty;
       this.waiting = Math.random() * traffic.skierWait;
-      if (!this.said && Math.random() < (level >= 3 ? 0.5 : level === 2 ? 0.25 : 0.05)) {
+      if (!this.said && Math.random() < (rail ? 0.4 : level >= 3 ? 0.5 : level === 2 ? 0.25 : 0.05)) {
         this.said = true;
-        say(this, pick(level >= 3 ? COMPLAINTS.trunk : COMPLAINTS.road));
+        say(this, pick(rail ? COMPLAINTS.rail : level >= 3 ? COMPLAINTS.trunk : COMPLAINTS.road));
       }
     } else if (!this.said && tracks.trampled(x, y) && Math.random() < 0.12) {
       this.said = true;

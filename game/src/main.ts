@@ -29,7 +29,7 @@ import { landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
 import { Flag, FLAG_NAMES, TERRAIN_NAMES } from "./terrain";
 import { askCrossing } from "./crossing";
-import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, roadTraffic, TrackNetwork } from "./tracks";
+import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
 import { Precipitation, Whimsy } from "./whimsy";
 import "./style.css";
@@ -135,7 +135,7 @@ async function main() {
   world.addChild(crew.layer);
   const labels = new Container();
   world.addChild(labels);
-  const signs = addPoiLabels(map, labels);
+  const signs = [...addPoiLabels(map, labels), ...addCrossingSigns(map, tracks, labels)];
   world.addChild(endsLayer, refusalTag);
   const night = new Graphics();
   const lightsWorld = new Container();
@@ -772,12 +772,16 @@ async function main() {
       : cost === null
       ? `<span class="minus">${tracks.blockReason(x, y) ?? "Kan ikke bygge her"}</span>`
       : obstacle === "rail"
-        ? `Jernbane: krever undergang (fra ${kr(cost + 120_000)})`
+        ? tracks.levelCrossing(x, y)
+          ? `🚧 Planovergang: kryssing fra ${kr(cost + RAIL_LEVEL_CROSSING.levelPrice)}`
+          : `Jernbane: krever undergang (fra ${kr(cost + 120_000)})`
         : obstacle === "road"
           ? `${map.roadName(x, y) ?? "Vei"}: kryssing fra ${kr(cost + roadTraffic(tracks.traffic(x, y)).levelPrice)}`
-          : map.has(x, y, Flag.Passage) && (map.has(x, y, Flag.Rail) || map.has(x, y, Flag.Road))
-            ? `Eksisterende bru/undergang: ${kr(cost)}`
-            : `Bygge løype: ${kr(cost)}`;
+          : tracks.passageOnRoad(x, y)
+            ? `🌉 Bru/undergang med vei: ${kr(cost)} — sporet må dele asfalten med bilene`
+            : map.has(x, y, Flag.Passage) && map.has(x, y, Flag.Rail)
+              ? `🌉 Eksisterende bru/undergang: ${kr(cost)}`
+              : `Bygge løype: ${kr(cost)}`;
     if (link) {
       action += `<br>Kobles til løypenettet med ${link.length} rute${link.length === 1 ? "" : "r"} til`;
     }
@@ -997,7 +1001,9 @@ async function main() {
       return { status: "built", paid: ground };
     }
     // A busier road met further along the same crossing gets its own question.
-    if (strokeCrossing?.obstacle === obstacle && tracks.traffic(x, y) <= strokeCrossing.traffic) {
+    const options = crossingOptions(obstacle, tracks.traffic(x, y), tracks.levelCrossing(x, y));
+    const sameKind = options.some((o) => o.type === strokeCrossing?.option.type);
+    if (strokeCrossing?.obstacle === obstacle && sameKind && tracks.traffic(x, y) <= strokeCrossing.traffic) {
       const price = ground + strokeCrossing.option.price;
       if (price > budget) {
         return { status: "blocked", paid: 0, reason: `Ikke råd: ${kr(price)}` };
@@ -1017,8 +1023,12 @@ async function main() {
     askCrossing(
       {
         title: obstacle === "rail" ? "Løypa krysser Gjøvikbanen" : `Løypa krysser ${road ?? "en vei"}`,
-        lead: obstacle === "rail" ? "Å gå over skinnene er ikke lov. Ikke engang i Hakadal." : roadTraffic(traffic).describe,
-        options: crossingOptions(obstacle, traffic),
+        lead: obstacle !== "rail"
+          ? roadTraffic(traffic).describe
+          : tracks.levelCrossing(x, y)
+            ? `${RAIL_LEVEL_CROSSING.describe} Her er det lov å gå over — når bommen er oppe.`
+            : "Å gå over skinnene er ikke lov. Ikke engang i Hakadal.",
+        options,
       },
       ground,
       budget,
@@ -1548,6 +1558,55 @@ const SIGN_STYLE = {
   station: { plate: 0x1c3f73, edge: 0x0d2240, text: 0xffffff, size: 15, prefix: "🚆 " },
   parking: { plate: 0x2f6fe0, edge: 0x173f8a, text: 0xffffff, size: 11, prefix: "P" },
 } as const;
+
+/**
+ * A sign at every place the railway can be got past without building an underpass: existing
+ * bridges and underpasses, and level crossings. They are few, small and decisive, so they are
+ * marked at every zoom level.
+ */
+function addCrossingSigns(map: GameMap, tracks: TrackNetwork, layer: Container): { node: Container; kind: string }[] {
+  const open = (x: number, y: number) =>
+    map.inside(x, y) && map.has(x, y, Flag.Rail) && (map.has(x, y, Flag.Passage) || map.has(x, y, Flag.LevelCrossing)) && tracks.cost(x, y) !== null;
+  const seen = new Set<number>();
+  const out: { node: Container; kind: string }[] = [];
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      if (seen.has(map.index(x, y)) || !open(x, y)) {
+        continue;
+      }
+      const cluster: [number, number][] = [];
+      const queue: [number, number][] = [[x, y]];
+      seen.add(map.index(x, y));
+      while (queue.length) {
+        const [cx, cy] = queue.pop()!;
+        cluster.push([cx, cy]);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (!seen.has(map.index(nx, ny)) && open(nx, ny)) {
+            seen.add(map.index(nx, ny));
+            queue.push([nx, ny]);
+          }
+        }
+      }
+      const level = cluster.some(([cx, cy]) => map.has(cx, cy, Flag.LevelCrossing));
+      const mx = cluster.reduce((t, [cx]) => t + cx, 0) / cluster.length;
+      const my = cluster.reduce((t, [, cy]) => t + cy, 0) / cluster.length;
+      const sign = new Container();
+      const text = new Text({ text: level ? "🚧" : "🌉", style: { fontSize: 13 }, resolution: 4 });
+      text.anchor.set(0.5);
+      const ring = new Graphics()
+        .circle(0, 0, 11)
+        .fill(0xffffff)
+        .stroke({ width: 2.5, color: level ? 0xc0392b : 0x1f5fd1 });
+      sign.addChild(ring, text);
+      sign.position.set((mx + 0.5) * PX, (my + 0.5) * PX);
+      layer.addChild(sign);
+      out.push({ node: sign, kind: "crossing" });
+    }
+  }
+  return out;
+}
 
 function addPoiLabels(map: GameMap, layer: Container): { node: Container; kind: string }[] {
   const out: { node: Container; kind: string }[] = [];

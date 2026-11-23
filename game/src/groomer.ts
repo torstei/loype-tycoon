@@ -1,7 +1,7 @@
 import { Container, Graphics, Text } from "pixi.js";
 import { GameMap } from "./map";
 import { PX } from "./render";
-import { Crossing, roadTraffic, TrackNetwork } from "./tracks";
+import { Crossing, RAIL_LEVEL_CROSSING, TrackNetwork } from "./tracks";
 import { Weather } from "./weather";
 
 /** Tiles per game hour: 10 km/h, about what a real snowcat manages. */
@@ -263,12 +263,10 @@ export class Groomer {
   }
 
   private crossRoad(x: number, y: number, tracks: TrackNetwork, ledger: Ledger) {
-    const atGrade = ([nx, ny]: [number, number]) => tracks.crossing[tracks.index(nx, ny)] === Crossing.AtGrade;
-    const level = Math.max(tracks.traffic(x, y), ...tracks.neighbours(x, y).filter(atGrade).map(([nx, ny]) => tracks.traffic(nx, ny)));
-    const traffic = roadTraffic(level);
+    const traffic = tracks.atGradeTraffic(x, y);
     this.waiting = Math.random() * traffic.groomerWait;
     if (this.waiting > 0.1) {
-      this.status = "Venter på en luke i trafikken";
+      this.status = traffic === RAIL_LEVEL_CROSSING ? "Venter ved bommen på planovergangen" : "Venter på en luke i trafikken";
     }
     if (Math.random() < traffic.incident) {
       const road = tracks.roadName(x, y) ?? "riksveien";

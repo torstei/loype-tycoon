@@ -54,8 +54,14 @@ Controls (press `H` in the game for the full list):
   bridge. How much it matters depends on the road: crossing a quiet local road on the level
   is no bother, a county road costs a little goodwill, and crossing Rv. 4 is an adventure —
   skiers queue for a gap, the snowcat waits too and now and then holds up the trucks, and
-  culverts and bridges there cost about twice as much. The railway cannot be crossed on the level: use an existing bridge or underpass
-  (taken from the OSM data, shown as "bru/undergang" on hover) or pay for a new underpass.
+  culverts and bridges there cost about twice as much.
+- **Gjøvikbanen** can only be got past where there is already a way: an existing bridge or
+  underpass (🌉) or a level crossing (🚧), all taken from the OSM data and marked with a sign
+  on the map at every zoom level, since they decide which side of the railway a club can
+  reach. Anywhere else costs a new underpass at 120 000 kr. At a level crossing the skiers and
+  the snowcat wait for the barriers; through a bridge or underpass that carries a road the
+  track has to share the asphalt, priced and felt like crossing that road. Roads and forest
+  roads can be followed however steep the hillside beside them.
 - **Grooming**: tool `4` places another garage next to the track, with a new machine
   (80 000 kr). Machines go out when tracks need it (by default only at night),
   groom their way round the network and drive home. Diesel is paid per tile groomed.
@@ -148,7 +154,9 @@ Output per region: `<name>.json` (terrain grid, feature flags, elevation, points
 interest, vector lines for drawing, the region's place on the global grid, and a `version`
 fingerprint of its content) and `<name>-preview.png`.
 
-Terrain ids and flag bits are shared between `mapgen.py` and `game/src/terrain.ts`.
+Terrain ids and flag bits are shared between `mapgen.py` and `game/src/terrain.ts`. Level
+crossings (flag bit 10) are found where a road or path meets the railway in OSM with neither
+on a bridge or in a tunnel.
 
 ## Data
 

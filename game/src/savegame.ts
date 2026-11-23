@@ -115,7 +115,7 @@ export function decodeTracks(map: GameMap, tracks: TrackNetwork, records: TrackR
     const [x, y] = local;
     const obstacle = tracks.obstacle(x, y);
     let type = crossing as Crossing;
-    if (obstacle === "rail" && type !== Crossing.Underpass) {
+    if (obstacle === "rail" && type !== Crossing.Underpass && !(type === Crossing.AtGrade && tracks.levelCrossing(x, y))) {
       // A railway now runs here and the saved track has no way under it.
       result.dropped++;
       continue;
