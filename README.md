@@ -179,8 +179,12 @@ browser session.
 On a narrow window or a touch-only device the layout turns compact: a one-line status bar on
 top, the tools as a single scrolling row of icons at the bottom (with zoom and forecast
 buttons) that ▾ tucks away together with the snowcat panel and 🛠 brings back, panels across
-the full width, and tile info on tap instead of hover, fading after a few seconds. Touch gestures beyond that (pinch zoom,
-panning while building) are still to come.
+the full width, and tile info on tap instead of hover, fading after a few seconds.
+
+Touch gestures: one finger builds (or pans, with 👀), two fingers pan and pinch-zoom in any
+tool. The zoom is free while pinching and settles on the nearest zoom step when the fingers
+lift. If the first finger has laid a tile or two before the second lands, that stroke is
+undone and refunded.
 
 ## Deploying
 

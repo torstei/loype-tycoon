@@ -34,6 +34,27 @@ export class Camera {
     this.anchor = { sx, sy, wx: w.x, wy: w.y };
   }
 
+  /** Free zoom while pinching: keep the world point (wx, wy) under the screen point (sx, sy). */
+  pinchTo(scale: number, sx: number, sy: number, wx: number, wy: number) {
+    const s = Math.max(ZOOM_LEVELS[0], Math.min(ZOOM_LEVELS[ZOOM_LEVELS.length - 1], scale));
+    this.anchor = null;
+    this.target = s;
+    this.world.scale.set(s);
+    this.world.position.set(sx - wx * s, sy - wy * s);
+  }
+
+  /** After a pinch, ease to the nearest fixed zoom step around (sx, sy), so buttons and wheel carry on from there. */
+  settle(sx: number, sy: number) {
+    let nearest = 0;
+    for (let i = 1; i < ZOOM_LEVELS.length; i++) {
+      if (Math.abs(Math.log(ZOOM_LEVELS[i] / this.scale)) < Math.abs(Math.log(ZOOM_LEVELS[nearest] / this.scale))) {
+        nearest = i;
+      }
+    }
+    this.level = nearest;
+    this.zoomAt(sx, sy, 0);
+  }
+
   pan(dx: number, dy: number) {
     this.world.x += dx;
     this.world.y += dy;
