@@ -5,6 +5,9 @@ import { Weather } from "./weather";
 /** Below this snow depth a groomer only scrapes gravel. */
 export const MIN_GROOMING_DEPTH = 15;
 
+/** Steeper than this (in %), no snowcat goes. */
+export const MAX_SLOPE = 40;
+
 /** How a track tile gets across a road or the railway. */
 export enum Crossing {
   None = 0,
@@ -182,10 +185,28 @@ export class TrackNetwork {
       return null;
     }
     const slope = this.map.slopeAt(x, y);
-    if (slope > 40) {
+    if (slope > MAX_SLOPE) {
       return null;
     }
     return Math.round(base * (1 + slope / 8));
+  }
+
+  /** Why track cannot be built here, in words for the player; null where cost() allows it. */
+  blockReason(x: number, y: number): string | null {
+    if (!this.map.inside(x, y)) {
+      return "Utenfor kartet";
+    }
+    const corridor = this.map.has(x, y, Flag.Rail) || this.map.has(x, y, Flag.Road);
+    if (this.map.has(x, y, Flag.Building) && !corridor) {
+      return "Det står et hus her";
+    }
+    if (BUILD_COST[this.map.terrainAt(x, y)] === null && !corridor) {
+      return "Tettbebyggelse: hager, innkjørsler og naboer som klager";
+    }
+    if (this.map.slopeAt(x, y) > MAX_SLOPE) {
+      return `For bratt (${Math.round(this.map.slopeAt(x, y))} %) — løypemaskina klarer maks ${MAX_SLOPE} %`;
+    }
+    return null;
   }
 
   add(x: number, y: number, crossing = Crossing.None) {

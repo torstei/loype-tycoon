@@ -122,6 +122,11 @@ async function main() {
   world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, fleet.machineLayer, crowd.layer, skijorer.layer);
   const cursor = new Graphics();
   const endsLayer = new Graphics();
+  const refusalTag = new Container();
+  const refusalText = new Text({ text: "", style: { fontSize: 13, fill: 0xffffff, fontWeight: "600", fontFamily: "system-ui, sans-serif" }, resolution: 2 });
+  const refusalBox = new Graphics();
+  refusalTag.addChild(refusalBox, refusalText);
+  refusalTag.visible = false;
   world.addChild(cursor);
   const whimsy = new Whimsy(map);
   world.addChild(whimsy.layer);
@@ -131,7 +136,7 @@ async function main() {
   const labels = new Container();
   world.addChild(labels);
   const signs = addPoiLabels(map, labels);
-  world.addChild(endsLayer);
+  world.addChild(endsLayer, refusalTag);
   const night = new Graphics();
   const lightsWorld = new Container();
   lightsWorld.addChild(crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
@@ -765,7 +770,7 @@ async function main() {
     let action = detached && !link
       ? `<span class="minus">${detached}</span>`
       : cost === null
-      ? "Kan ikke bygge her"
+      ? `<span class="minus">${tracks.blockReason(x, y) ?? "Kan ikke bygge her"}</span>`
       : obstacle === "rail"
         ? `Jernbane: krever undergang (fra ${kr(cost + 120_000)})`
         : obstacle === "road"
@@ -892,8 +897,40 @@ async function main() {
     return ok ? path : null;
   };
 
+  let refusal: { x: number; y: number; ttl: number } | null = null;
+  /** Say on the map, right where it happened, why a tile was refused. */
+  const showRefusal = (x: number, y: number, reason: string) => {
+    refusal = { x, y, ttl: 2.5 };
+    refusalText.text = reason;
+    const w = refusalText.width + 16;
+    const h = refusalText.height + 8;
+    refusalBox.clear().roundRect(0, 0, w, h, 6).fill({ color: 0xa8281e, alpha: 0.95 }).stroke({ width: 1.5, color: 0xffffff });
+    refusalText.position.set(8, 4);
+    refusalTag.pivot.set(w / 2, h + 14);
+  };
+
   const drawEnds = (dt: number) => {
     endsLayer.clear();
+    refusalTag.visible = refusal !== null;
+    if (refusal) {
+      refusal.ttl -= dt;
+      const a = Math.min(1, refusal.ttl * 2);
+      const k = 1 / camera.scale;
+      const [x0, y0] = [refusal.x * PX, refusal.y * PX];
+      const pad = Math.max(PX, 10 * k) / 2;
+      const cx = x0 + PX / 2;
+      const cy = y0 + PX / 2;
+      endsLayer
+        .moveTo(cx - pad, cy - pad).lineTo(cx + pad, cy + pad)
+        .moveTo(cx + pad, cy - pad).lineTo(cx - pad, cy + pad)
+        .stroke({ width: 3 * k, color: 0xa8281e, alpha: a, cap: "round" });
+      refusalTag.position.set(cx, cy - pad);
+      refusalTag.scale.set(k);
+      refusalTag.alpha = a;
+      if (refusal.ttl <= 0) {
+        refusal = null;
+      }
+    }
     if (hint) {
       hint.ttl -= dt;
       const [fx, fy] = hint.from;
@@ -943,7 +980,7 @@ async function main() {
     }
     const ground = tracks.cost(x, y);
     if (ground === null) {
-      return { status: "blocked", paid: 0, reason: "Kan ikke bygge her" };
+      return { status: "blocked", paid: 0, reason: tracks.blockReason(x, y) ?? "Kan ikke bygge her" };
     }
     const unconnected = connectionProblem(x, y);
     if (unconnected) {
@@ -1010,6 +1047,10 @@ async function main() {
       if (result.status === "asked") {
         painting = null;
       }
+      if (result.status === "blocked" && !strokeRefused) {
+        strokeRefused = true;
+        showRefusal(x, y, result.reason ?? "Kan ikke bygge her");
+      }
       return result.paid;
     }
     if (tool === "remove" && tracks.has(x, y)) {
@@ -1019,12 +1060,14 @@ async function main() {
   };
 
   let stroke: { x: number; y: number; paid: number }[] = [];
+  /** Only the first refusal in a drag is shown: everything after it is just "not connected". */
+  let strokeRefused = false;
   let painting: [number, number] | null = null;
 
   const paintStep = (x: number, y: number) => {
     const paid = applyTool(x, y);
     const [before, last] = stroke.slice(-2);
-    const diagonalToBefore = before && Math.abs(before.x - x) === 1 && Math.abs(before.y - y) === 1;
+    const diagonalToBefore = last && Math.abs(before.x - x) === 1 && Math.abs(before.y - y) === 1;
     // Never cut a corner through a crossing: that money bought a bridge, not a staircase step.
     const lastIsPlain = last && tracks.crossing[map.index(last.x, last.y)] === Crossing.None;
     if (tool === "build" && diagonalToBefore && last.paid > 0 && lastIsPlain) {
@@ -1053,6 +1096,7 @@ async function main() {
       painting = tileAt(e.offsetX, e.offsetY);
       stroke = [];
       strokeCrossing = null;
+      strokeRefused = false;
       const [px, py] = painting;
       if (tool === "build" && !tracks.has(px, py) && tracks.cost(px, py) !== null && connectionProblem(px, py) && fleet.garages.length > 0) {
         const link = connector(px, py);
@@ -1164,6 +1208,7 @@ async function main() {
         if (result.status === "blocked") {
           crew.refuse();
           describe(nx, ny);
+          showRefusal(tx, ty, result.reason ?? "Kan ikke bygge her");
           if (result.reason?.startsWith("Ikke råd")) {
             info.innerHTML += `<br><strong class="warn">${result.reason}</strong>`;
           }
