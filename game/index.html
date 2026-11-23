@@ -33,10 +33,12 @@
     <div id="topbar">
       <div id="hud"></div>
       <div id="tools">
-        <button data-tool="look" title="1">👀 Se</button>
-        <button data-tool="build" title="2">⛷ Bygg løype</button>
-        <button data-tool="remove" title="3">✖ Fjern</button>
-        <button data-tool="garage" title="4">🏠 Garasje</button>
+        <button data-tool="look" title="1">👀 <span class="label">Se</span></button>
+        <button data-tool="build" title="2">⛷ <span class="label">Bygg løype</span></button>
+        <button data-tool="remove" title="3">✖ <span class="label">Fjern</span></button>
+        <button data-tool="garage" title="4">🏠 <span class="label">Garasje</span></button>
+        <button class="compact-only" data-zoom="1" title="Zoom inn">＋</button>
+        <button class="compact-only" data-zoom="-1" title="Zoom ut">－</button>
         <span class="speed">
           <button data-speed="-1" title="Mellomrom">⏸</button>
           <button data-speed="0" title="1×">▶</button>
@@ -45,11 +47,12 @@
           <button data-speed="3" title="8×">⏩</button>
           <button data-speed="4" title="16×">⏩⏩</button>
         </span>
-        <button id="snow" title="N">❄ Snøvær</button>
-        <button id="report-button" title="F">📰 Føremelding</button>
-        <button id="paper-button" title="V">🗞 Varingen</button>
-        <button id="groom-map" title="G">🕑 Sist preppet</button>
-        <button id="menu-button" title="M">💾 Spill</button>
+        <button id="snow" title="N">❄ <span class="label">Snøvær</span></button>
+        <button class="compact-only" id="forecast-button" title="Værvarsel">🌤</button>
+        <button id="report-button" title="F">📰 <span class="label">Føremelding</span></button>
+        <button id="paper-button" title="V">🗞 <span class="label">Varingen</span></button>
+        <button id="groom-map" title="G">🕑 <span class="label">Sist preppet</span></button>
+        <button id="menu-button" title="M">💾 <span class="label">Spill</span></button>
       </div>
     </div>
     <div id="info"></div>
@@ -65,9 +68,10 @@
     <div id="kiosk" hidden></div>
     <div id="setup">
       <strong>🏠 Hvor holder løypelaget til?</strong>
-      Klikk der garasjen skal stå — nær en stasjon, parkering eller et boligfelt (de grønne ringene).
+      <span class="compact-only">Trykk der garasjen skal stå, innenfor en av de grønne ringene. Den første er gratis.</span>
+      <span class="wide-only">Klikk der garasjen skal stå — nær en stasjon, parkering eller et boligfelt (de grønne ringene).
       Den første garasjen er gratis: løypelaget eier allerede Gamle Gunnar. Med tastaturet: flytt
-      mannskapet og trykk Enter.
+      mannskapet og trykk Enter.</span>
     </div>
     <div id="help" hidden>
       <h2>Tastatur</h2>
