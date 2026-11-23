@@ -80,7 +80,7 @@ const BAR_HIDDEN = "loype-tycoon:bar-hidden";
 /** On a phone the tile info goes away by itself, since there is no pointer leaving to hide it. */
 const COMPACT_INFO_MS = 5000;
 /** How far a finger may move, in screen pixels, and still count as a tap. */
-const TOUCH_SLOP = 10;
+const TOUCH_SLOP = 14;
 /** A tap lays a straight line from the crew up to this many tiles away. */
 const TAP_REACH = 30;
 /** A stroke this short when a second finger lands was the start of a pinch, not a track. */
@@ -1066,7 +1066,7 @@ async function main() {
       crew.y = y;
       setTool("build");
       showToast(`🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! ${document.documentElement.classList.contains("compact")
-        ? "Trykk der løypa skal gå: den legges i rett linje fra det røde flagget, som nå står ved garasjen. Du kan også dra med én finger. To fingre flytter og zoomer kartet, og ↶ angrer."
+        ? "Trykk der løypa skal gå: du ser først hvor den blir lagt fra det røde flagget, som nå står ved garasjen, og trykker «Lag løype». Én finger flytter kartet, to fingre zoomer, og ↶ angrer."
         : "Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S."} Tiden starter når den første løypa er lagt.`);
     } else {
       setTool("look");
@@ -1658,10 +1658,9 @@ async function main() {
     const [x, y] = tileAt(e.offsetX, e.offsetY);
     describe(x, y);
     if (pendingTouch && Math.hypot(e.offsetX - pendingTouch.sx, e.offsetY - pendingTouch.sy) > TOUCH_SLOP) {
-      const [sx, sy] = pendingTouch.tile;
+      // One finger moves the map, as in every map app; track is laid by tapping and confirming.
       pendingTouch = null;
-      [crew.x, crew.y] = [sx, sy];
-      beginStroke(sx, sy);
+      panning = { x: e.clientX, y: e.clientY };
     }
     if (panning) {
       camera.pan(e.clientX - panning.x, e.clientY - panning.y);
