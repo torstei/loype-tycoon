@@ -37,7 +37,11 @@ import { Weather, WEATHER_ICON } from "./weather";
 import { Precipitation, Whimsy } from "./whimsy";
 import "./style.css";
 
-type Tool = "look" | "build" | "remove" | "garage" | "cabin";
+type Tool = "look" | "build" | "remove" | "garage" | "koie" | "hytte";
+/** The things the build menu offers, in its order. */
+const BUILD_TOOLS: Tool[] = ["build", "garage", "koie", "hytte"];
+/** Which cabin level each cabin tool builds. */
+const CABIN_TOOL_TIER: Partial<Record<Tool, number>> = { koie: 1, hytte: 2 };
 
 /** Hours since grooming, upper bound of each band, and its colour on the grooming map. */
 const GROOM_AGE: [number, number, string][] = [
@@ -73,7 +77,8 @@ const PAN_KEYS: Record<string, [number, number]> = {
 };
 
 const START_BUDGET = 150_000;
-const TOOL_ICONS: Record<Tool, string> = { look: "👀", build: "⛷", remove: "✖", garage: "🏠", cabin: "🛖" };
+const TOOL_ICONS: Record<Tool, string> = { look: "👀", build: "⛷", remove: "✖", garage: "🏠", koie: "🛖", hytte: "🏡" };
+const TOOL_NAMES: Record<Tool, string> = { look: "Se", build: "Bygg løype", remove: "Fjern", garage: "Bygg garasje", koie: "Bygg dugnadskoie", hytte: "Bygg betjent hytte" };
 /** Below this window width (or on a touch-only device) the tools move to a bar at the bottom. */
 const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
@@ -331,6 +336,22 @@ async function main() {
   const pausedBanner = document.getElementById("paused")!;
   const toolMenu = document.getElementById("tool-menu")!;
   const toolMenuButton = document.getElementById("tool-menu-button")!;
+  const buildChoice = document.getElementById("build-choice")!;
+  let lastBuildTool: Tool = "build";
+  /** Open the tool menu: above the bar on a phone, below the build button on a wide screen. */
+  const openToolMenu = (anchor: HTMLElement) => {
+    toolMenu.hidden = !toolMenu.hidden;
+    if (document.documentElement.classList.contains("compact")) {
+      toolMenu.style.removeProperty("top");
+      toolMenu.style.removeProperty("left");
+      toolMenu.style.removeProperty("bottom");
+    } else {
+      const r = anchor.getBoundingClientRect();
+      toolMenu.style.left = `${r.left}px`;
+      toolMenu.style.top = `${r.bottom + 4}px`;
+      toolMenu.style.bottom = "auto";
+    }
+  };
   const barShow = document.getElementById("bar-show")!;
   const toolbar = document.getElementById("tools")!;
   const placePanels = () => {
@@ -364,9 +385,8 @@ async function main() {
     placePanels();
   };
   document.getElementById("bar-hide")!.addEventListener("click", () => setBarHidden(true));
-  toolMenuButton.addEventListener("click", () => {
-    toolMenu.hidden = !toolMenu.hidden;
-  });
+  toolMenuButton.addEventListener("click", () => openToolMenu(toolMenuButton));
+  buildChoice.addEventListener("click", () => openToolMenu(buildChoice));
   document.getElementById("undo")!.addEventListener("click", () => undoLastStroke());
   document.getElementById("bar-show")!.addEventListener("click", () => setBarHidden(false));
   try {
@@ -401,6 +421,16 @@ async function main() {
       btn.classList.toggle("active", btn.dataset.tool === tool);
     }
     toolMenuButton.textContent = `${TOOL_ICONS[tool]}▴`;
+    if (BUILD_TOOLS.includes(tool)) {
+      lastBuildTool = tool;
+    }
+    buildChoice.textContent = `${TOOL_ICONS[lastBuildTool]} ${TOOL_NAMES[lastBuildTool]} ▾`;
+    buildChoice.classList.toggle("active", BUILD_TOOLS.includes(tool));
+    for (const el of toolMenu.querySelectorAll<HTMLElement>("[data-price]")) {
+      const which = el.dataset.price;
+      const price = which === "garage" ? fleet.nextGarageCost : CABIN_TIERS[which === "koie" ? 1 : 2].price;
+      el.textContent = price === 0 ? "gratis" : kr(price);
+    }
     barShow.textContent = `${TOOL_ICONS[tool]} ▴`;
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-speed]")) {
       const i = Number(btn.dataset.speed);
@@ -672,19 +702,25 @@ async function main() {
     return null;
   };
 
-  /** The cabin tool on a tile: open the cabin that is there, or offer to build one. */
-  const cabinTool = (x: number, y: number) => {
+  /** A cabin tool on a tile: open the cabin that is there, or build the chosen kind on the spot. */
+  const cabinTool = (x: number, y: number, tier: number) => {
     const existing = cabinNear(x, y, 1);
     if (existing) {
       openCabin(existing.x, existing.y);
       return;
     }
-    const problem = cabinProblem(x, y);
+    const spec = CABIN_TIERS[tier];
+    const problem = cabinProblem(x, y) ?? (spec.price > budget ? `Ikke råd: ${kr(spec.price)}` : null);
     if (problem) {
       showRefusal(x, y, problem);
       return;
     }
-    openCabin(x, y);
+    budget -= spec.price;
+    placeOutlet(x, y, tier, "cabin");
+    const where = nearestPlace(x, y);
+    cabinBuiltToday = `${spec.name}${where ? ` ved ${where}` : ""}`;
+    showToast(`${TOOL_ICONS[tier === 2 ? "hytte" : "koie"]} <strong>${spec.name}</strong> står klar${where ? ` ved ${where}` : ""}. ${spec.rooms ? "Sengene er redd opp og komfyren er varm." : "Vaffeljernet er plugget i, og de frivillige har satt opp vaktliste."} Klikk på hytta for å se hvordan det går.`);
+    refreshHud();
   };
 
   /** Existing cabins with someone serving: the club claims them by bringing the track within reach. */
@@ -1298,14 +1334,15 @@ async function main() {
         (${Math.round(tracks.quality(x, y, weather) * 100)} %)<br>
         nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}<br>
         ≈ ${Math.round(tracks.usage[i])} skiløpere siste døgnet`;
-    } else if (tool === "cabin") {
+    } else if (CABIN_TOOL_TIER[tool] !== undefined) {
+      const spec = CABIN_TIERS[CABIN_TOOL_TIER[tool]!];
       const existing = cabinNear(x, y, 1);
       const problem = existing ? null : cabinProblem(x, y);
       action = existing
         ? `🛖 ${existing.title}: klikk for å åpne`
         : problem
           ? `<span class="minus">${problem}</span>`
-          : `🛖 Hytte her: dugnadskoie fra ${kr(CABIN_TIERS[1].price)}`;
+          : `${TOOL_ICONS[tool]} ${spec.name} her: ${kr(spec.price)}`;
     } else if (tool === "garage") {
       const problem = garageProblem(x, y);
       action = problem ? `<span class="minus">${problem}</span>` : `Garasje her: ${fleet.nextGarageCost === 0 ? "gratis" : kr(fleet.nextGarageCost)}`;
@@ -1623,8 +1660,8 @@ async function main() {
    * straight line from the crew, when the crew stands on track close enough, or starts a stroke there.
    */
   const tapTile = (tx: number, ty: number) => {
-    if (tool === "cabin") {
-      cabinTool(tx, ty);
+    if (CABIN_TOOL_TIER[tool] !== undefined) {
+      cabinTool(tx, ty, CABIN_TOOL_TIER[tool]!);
       return;
     }
     const cabin = cabinNear(tx, ty, 1);
@@ -1922,7 +1959,7 @@ async function main() {
     if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
       return;
     }
-    const fingerTool = e.pointerType === "touch" && (tool === "build" || tool === "remove" || tool === "cabin");
+    const fingerTool = e.pointerType === "touch" && (tool === "build" || tool === "remove" || CABIN_TOOL_TIER[tool] !== undefined);
     if (e.button === 0 && fingerTool) {
       // A finger may be about to tap, drag or pinch: wait and see before laying anything.
       pendingTouch = { sx: e.offsetX, sy: e.offsetY, tile: tileAt(e.offsetX, e.offsetY) };
@@ -1942,8 +1979,8 @@ async function main() {
       placeGarage(...tileAt(e.offsetX, e.offsetY));
       return;
     }
-    if (e.button === 0 && tool === "cabin") {
-      cabinTool(...tileAt(e.offsetX, e.offsetY));
+    if (e.button === 0 && CABIN_TOOL_TIER[tool] !== undefined) {
+      cabinTool(...tileAt(e.offsetX, e.offsetY), CABIN_TOOL_TIER[tool]!);
       return;
     }
     if (e.button === 0 && tool === "look") {
@@ -2195,7 +2232,7 @@ async function main() {
       toolMenu.hidden = true;
       clearPlan();
     } else {
-      const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage", Digit5: "cabin" } as Record<string, Tool>)[e.code];
+      const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage", Digit5: "koie", Digit6: "hytte" } as Record<string, Tool>)[e.code];
       if (!t) {
         return;
       }

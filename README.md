@@ -46,6 +46,9 @@ Controls (press `H` in the game for the full list):
   the track under the crew. The crew follows the mouse: clicking a tile puts it there, and
   after a drag it stands at the end of the new track, so clicking anywhere on the network
   and walking off with the keypad makes a branch.
+- **Build menu**: "⛷ Bygg løype ▾" in the toolbar (or the tool button on a phone) chooses what
+  to build — track, garage, dugnadskoie or staffed cabin, with prices — and a click on the map
+  builds it. Keys `2`, `4`, `5`, `6` pick the same; `1` looks, `3` removes track.
 - **Mouse**: left-drag paints track (tool 2) or removes it (tool 3); right-drag pans; the
   wheel steps through the zoom levels. On a touchpad, pinch zooms and two-finger scroll pans.
 - **Time**: Space pauses, `,`/`.` slow down / speed up (1×–16×; a game day is about five
@@ -122,8 +125,8 @@ itself in about seven weeks at a booth and three and a half at a kiosk.
 
 Cabins give skiers somewhere to go. Existing serviced cabins and cafés from OSM (Gørjahytta,
 Varingstua, Cafe Snøtunet and others, marked ☕ on the map) are claimed by bringing the track
-within two tiles; they then sell waffles for the club. Tool `5` (🛖) builds new ones beside
-the track: a dugnadskoie (30 000 kr, volunteers selling waffles at weekends) or a staffed
+within two tiles; they then sell waffles for the club. New ones are chosen in the build menu
+and placed beside the track with a click (keys `5` and `6`): a dugnadskoie (30 000 kr, volunteers selling waffles at weekends) or a staffed
 cabin (450 000 kr, open daily with food, waffles and ten rooms let for the night, which fill
 with the club's reputation, at weekends and in the holidays, against 2 500 kr a day in wages).
 Skiers who have not yet visited a cabin lean towards it while it is within reach of their

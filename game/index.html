@@ -36,10 +36,8 @@
         <button class="compact-only" id="bar-hide" title="Skjul verktøylinja">▾</button>
         <button class="compact-only" id="tool-menu-button" title="Velg verktøy">⛷</button>
         <button data-tool="look" title="1">👀 <span class="label">Se</span></button>
-        <button data-tool="build" title="2">⛷ <span class="label">Bygg løype</span></button>
+        <button class="wide-only" id="build-choice" title="Velg hva du bygger (2 · 4 · 5 · 6)">⛷ Bygg løype ▾</button>
         <button data-tool="remove" title="3">✖ <span class="label">Fjern</span></button>
-        <button data-tool="garage" title="4">🏠 <span class="label">Garasje</span></button>
-        <button data-tool="cabin" title="5">🛖 <span class="label">Hytte</span></button>
         <button class="compact-only" id="undo" title="Angre siste løype (Ctrl+Z)">↶</button>
         <button class="compact-only" data-zoom="1" title="Zoom inn">＋</button>
         <button class="compact-only" data-zoom="-1" title="Zoom ut">－</button>
@@ -67,11 +65,14 @@
     <button id="bar-show" class="compact-only" title="Vis verktøylinja">🛠 ▴</button>
     <div id="build-plan" hidden></div>
     <div id="tool-menu" hidden>
-      <button data-tool="look">👀 Se deg rundt</button>
-      <button data-tool="build">⛷ Bygg løype</button>
-      <button data-tool="remove">✖ Fjern løype</button>
-      <button data-tool="garage">🏠 Garasje</button>
-      <button data-tool="cabin">🛖 Hytte</button>
+      <div class="group">Bygg</div>
+      <button data-tool="build">⛷ Løype <small>pris etter terreng</small></button>
+      <button data-tool="garage">🏠 Garasje <small data-price="garage"></small></button>
+      <button data-tool="koie">🛖 Dugnadskoie <small data-price="koie"></small></button>
+      <button data-tool="hytte">🏡 Betjent hytte <small data-price="hytte"></small></button>
+      <div class="group not-build">Annet</div>
+      <button class="not-build" data-tool="look">👀 Se deg rundt</button>
+      <button class="not-build" data-tool="remove">✖ Fjern løype</button>
     </div>
     <div id="report" hidden></div>
     <div id="paper" hidden></div>
@@ -95,7 +96,8 @@
         <tr><th>Enter</th><td>Sett garasjen der mannskapet står (med garasjeverktøyet)</td></tr>
         <tr><th>+ / − · PgUp / PgDn</th><td>Zoom inn / ut</td></tr>
         <tr><th>Piltaster</th><td>Flytt kartet</td></tr>
-        <tr><th>1 · 2 · 3 · 4 · 5</th><td>Musverktøy: se · bygg · fjern · garasje · hytte</td></tr>
+        <tr><th>1 · 3</th><td>Se · fjern løype</td></tr>
+        <tr><th>2 · 4 · 5 · 6</th><td>Bygg: løype · garasje · dugnadskoie · betjent hytte</td></tr>
         <tr><th>Mellomrom</th><td>Pause</td></tr>
         <tr><th>, / .</th><td>Saktere / fortere</td></tr>
         <tr><th>N</th><td>Vis nedbør av/på</td></tr>
