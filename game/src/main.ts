@@ -4,6 +4,7 @@ import { dayLabel, GameClock, SPEEDS, weekday } from "./clock";
 import { Fleet, GARAGE_REACH } from "./groomer";
 import { areas, Report, writeReport } from "./report";
 import { Kiosk, KIOSK_TIERS } from "./kiosk";
+import { waitForTouchChoice } from "./mobile";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
 import {
   decodeTracks,
@@ -76,6 +77,7 @@ const CONNECT_REACH = 3;
 const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
 
 async function main() {
+  await waitForTouchChoice();
   const map = await GameMap.load("hakadal");
   const tracks = new TrackNetwork(map);
   const clock = new GameClock();

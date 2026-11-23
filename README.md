@@ -169,6 +169,13 @@ Terrain ids and flag bits are shared between `mapgen.py` and `game/src/terrain.t
 crossings (flag bit 10) are found where a road or path meets the railway in OSM with neither
 on a bridge or in a tunnel.
 
+## Phones and tablets
+
+The game needs a mouse and a keyboard. On a touch-only device (coarse pointer and no fine
+one) it says so before loading the map, offers to share or copy the link to open on a
+computer, and lets anyone carry on anyway, warned that it will be painful, for the rest of the
+browser session.
+
 ## Deploying
 
 The game is published at https://torstei.github.io/loype-tycoon/. Changes reach `main` through
