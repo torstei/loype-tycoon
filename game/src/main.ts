@@ -73,6 +73,7 @@ const PAN_KEYS: Record<string, [number, number]> = {
 };
 
 const START_BUDGET = 150_000;
+const TOOL_ICONS: Record<Tool, string> = { look: "👀", build: "⛷", remove: "✖", garage: "🏠" };
 /** Below this window width (or on a touch-only device) the tools move to a bar at the bottom. */
 const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
@@ -157,7 +158,8 @@ async function main() {
   const labels = new Container();
   world.addChild(labels);
   const signs = [...addPoiLabels(map, labels), ...addCrossingSigns(map, tracks, labels)];
-  world.addChild(endsLayer, refusalTag);
+  const planLayer = new Graphics();
+  world.addChild(planLayer, endsLayer, refusalTag);
   const night = new Graphics();
   const lightsWorld = new Container();
   lightsWorld.addChild(crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
@@ -280,6 +282,9 @@ async function main() {
   const topbar = document.getElementById("topbar")!;
   const fleetPanel = document.getElementById("fleet")!;
   const pausedBanner = document.getElementById("paused")!;
+  const toolMenu = document.getElementById("tool-menu")!;
+  const toolMenuButton = document.getElementById("tool-menu-button")!;
+  const barShow = document.getElementById("bar-show")!;
   const toolbar = document.getElementById("tools")!;
   const placePanels = () => {
     const top = `${topbar.offsetHeight + 8}px`;
@@ -312,6 +317,9 @@ async function main() {
     placePanels();
   };
   document.getElementById("bar-hide")!.addEventListener("click", () => setBarHidden(true));
+  toolMenuButton.addEventListener("click", () => {
+    toolMenu.hidden = !toolMenu.hidden;
+  });
   document.getElementById("undo")!.addEventListener("click", () => undoLastStroke());
   document.getElementById("bar-show")!.addEventListener("click", () => setBarHidden(false));
   try {
@@ -345,6 +353,8 @@ async function main() {
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-tool]")) {
       btn.classList.toggle("active", btn.dataset.tool === tool);
     }
+    toolMenuButton.textContent = `${TOOL_ICONS[tool]}▴`;
+    barShow.textContent = `${TOOL_ICONS[tool]} ▴`;
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-speed]")) {
       const i = Number(btn.dataset.speed);
       btn.classList.toggle("active", i < 0 ? clock.paused : !clock.paused && clock.speedIndex === i);
@@ -1320,6 +1330,7 @@ async function main() {
       return;
     }
     if (tracks.has(tx, ty)) {
+      clearPlan();
       [crew.x, crew.y] = [tx, ty];
       return;
     }
@@ -1333,19 +1344,10 @@ async function main() {
       return;
     }
     if (from) {
-      painting = from;
-      stroke = [];
-      strokeCrossing = null;
-      strokeRefused = false;
-      for (const [lx, ly] of [...lineTiles(from[0], from[1], tx, ty)].slice(1)) {
-        paintStep(lx, ly);
-        if (!painting) {
-          break;
-        }
-      }
-    } else {
-      beginStroke(tx, ty);
+      showPlan(from, planRoute(from, tx, ty));
+      return;
     }
+    beginStroke(tx, ty);
     if (stroke.length > 0) {
       lastStroke = stroke.slice();
     }
@@ -1353,6 +1355,145 @@ async function main() {
     redrawTracks();
     refreshHud();
   };
+
+  type PlanTile = { x: number; y: number; kind: "track" | "new" | "crossing" | "blocked"; price: number; reason?: string };
+  let plan: PlanTile[] | null = null;
+  const planPanel = document.getElementById("build-plan")!;
+
+  /** What a straight line of track from a tile to another would meet, stopping at the first tile it cannot cross. */
+  const planRoute = (from: [number, number], tx: number, ty: number): PlanTile[] => {
+    const out: PlanTile[] = [];
+    for (const [x, y] of [...lineTiles(from[0], from[1], tx, ty)].slice(1)) {
+      if (tracks.has(x, y)) {
+        out.push({ x, y, kind: "track", price: 0 });
+        continue;
+      }
+      const ground = tracks.cost(x, y);
+      if (ground === null) {
+        out.push({ x, y, kind: "blocked", price: 0, reason: tracks.blockReason(x, y) ?? "Kan ikke bygge her" });
+        break;
+      }
+      const obstacle = tracks.obstacle(x, y);
+      if (obstacle) {
+        const cheapest = Math.min(...crossingOptions(obstacle, tracks.traffic(x, y), tracks.levelCrossing(x, y)).map((o) => o.price));
+        out.push({ x, y, kind: "crossing", price: ground + cheapest });
+      } else {
+        out.push({ x, y, kind: "new", price: ground });
+      }
+    }
+    return out;
+  };
+
+  const PLAN_COLOURS: Record<PlanTile["kind"], number> = { track: 0x1f5fd1, new: 0x2fa84f, crossing: 0xf2c12e, blocked: 0xc0392b };
+
+  /** Show a planned line on the map and ask whether to lay it. */
+  const showPlan = (from: [number, number], tiles: PlanTile[]) => {
+    plan = tiles;
+    planLayer.clear();
+    const [fx, fy] = from;
+    const end = tiles.at(-1);
+    if (end) {
+      planLayer
+        .moveTo((fx + 0.5) * PX, (fy + 0.5) * PX)
+        .lineTo((end.x + 0.5) * PX, (end.y + 0.5) * PX)
+        .stroke({ width: 3, color: 0x23323d, alpha: 0.5 });
+    }
+    for (const t of tiles) {
+      if (t.kind === "blocked") {
+        planLayer
+          .moveTo(t.x * PX + 2, t.y * PX + 2).lineTo((t.x + 1) * PX - 2, (t.y + 1) * PX - 2)
+          .moveTo((t.x + 1) * PX - 2, t.y * PX + 2).lineTo(t.x * PX + 2, (t.y + 1) * PX - 2)
+          .stroke({ width: 3, color: PLAN_COLOURS.blocked, cap: "round" });
+      } else {
+        planLayer.rect(t.x * PX + 1, t.y * PX + 1, PX - 2, PX - 2).fill({ color: PLAN_COLOURS[t.kind], alpha: t.kind === "track" ? 0.25 : 0.6 })
+          .stroke({ width: 1.5, color: 0xffffff, alpha: 0.9 });
+      }
+    }
+    const fresh = tiles.filter((t) => t.kind === "new" || t.kind === "crossing");
+    const total = fresh.reduce((s, t) => s + t.price, 0);
+    const crossings = tiles.some((t) => t.kind === "crossing");
+    const blocked = tiles.find((t) => t.kind === "blocked");
+    const lines: string[] = [];
+    if (fresh.length === 0) {
+      lines.push(blocked ? `<strong>Ingenting å bygge her.</strong> ${blocked.reason}.` : "<strong>Det ligger allerede løype hele veien.</strong>");
+    } else {
+      lines.push(`<strong>${fresh.length} nye løyperute${fresh.length === 1 ? "" : "r"} · ${crossings ? "fra " : ""}${kr(total)}</strong>`);
+      const named = tiles
+        .filter((t, i) => t.kind === "crossing" && tiles[i - 1]?.kind !== "crossing")
+        .map((t) => {
+          if (tracks.obstacle(t.x, t.y) !== "rail") {
+            return `Krysser ${map.roadName(t.x, t.y) ?? "en vei"} — du velger hvordan underveis.`;
+          }
+          return tracks.levelCrossing(t.x, t.y)
+            ? "Krysser Gjøvikbanen på planovergangen — du velger underveis."
+            : `Krysser Gjøvikbanen: krever undergang til ${kr(crossingOptions("rail", 0)[0].price)}.`;
+        });
+      lines.push(...new Set(named));
+      if (blocked) {
+        lines.push(`Stopper før: ${(blocked.reason ?? "noe som ikke kan bygges over").toLowerCase()}.`);
+      }
+      if (total > budget) {
+        lines.push(`<span class="minus">Kassa rekker ikke hele veien — det bygges så langt pengene holder.</span>`);
+      }
+    }
+    planPanel.innerHTML = `<div class="text">${lines.join("<br>")}</div>
+      <div class="actions">${fresh.length ? `<button data-plan="build">Lag løype</button>` : ""}<button data-plan="cancel">Avbryt</button></div>`;
+    planPanel.hidden = false;
+    toast.hidden = true;
+    // Keep the whole route in view above the panel, without pushing it under the status line.
+    const ys = [from, ...tiles.map((t): [number, number] => [t.x, t.y])].map(([x, y]) => world.toGlobal({ x: (x + 0.5) * PX, y: (y + 0.5) * PX }).y);
+    const lowest = Math.max(...ys) + PX * camera.scale;
+    const room = planPanel.getBoundingClientRect().top - 12;
+    if (lowest > room) {
+      const highest = Math.min(...ys) - PX * camera.scale;
+      camera.pan(0, -Math.min(lowest - room, Math.max(0, highest - topbar.offsetHeight - 8)));
+    }
+  };
+
+  const clearPlan = () => {
+    plan = null;
+    planLayer.clear();
+    planPanel.hidden = true;
+  };
+
+  /** Lay tiles in order; a crossing asks first, and the rest follows once it is chosen. */
+  const layPath = (tiles: [number, number][], built: { x: number; y: number; paid: number }[]) => {
+    lastStroke = built;
+    for (let i = 0; i < tiles.length; i++) {
+      const [x, y] = tiles[i];
+      const before = budget;
+      const result = build(x, y, () => {
+        built.push({ x, y, paid: before - budget });
+        [crew.x, crew.y] = [x, y];
+        layPath(tiles.slice(i + 1), built);
+      });
+      if (result.status === "asked") {
+        return;
+      }
+      if (result.status === "blocked") {
+        showRefusal(x, y, result.reason ?? "Kan ikke bygge her");
+        break;
+      }
+      if (result.status === "built") {
+        built.push({ x, y, paid: result.paid });
+      }
+      [crew.x, crew.y] = [x, y];
+    }
+    redrawTracks();
+    refreshHud();
+  };
+
+  planPanel.addEventListener("click", (e) => {
+    const action = (e.target as HTMLElement).closest("button")?.dataset.plan;
+    if (action === "build" && plan) {
+      const tiles = plan.filter((t) => t.kind !== "blocked").map((t): [number, number] => [t.x, t.y]);
+      clearPlan();
+      strokeCrossing = null;
+      layPath(tiles, []);
+    } else if (action === "cancel") {
+      clearPlan();
+    }
+  });
 
   /** Take back the last stroke and the money it cost. */
   const undoLastStroke = () => {
@@ -1399,6 +1540,7 @@ async function main() {
   let panning: { x: number; y: number } | null = null;
 
   app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  let lookHintShown = false;
   /** Fingers on the map, for two-finger pan and pinch zoom. */
   const touches = new Map<number, { x: number; y: number }>();
   let pinch: { distance: number; scale: number; wx: number; wy: number; mx: number; my: number } | null = null;
@@ -1444,6 +1586,10 @@ async function main() {
   window.addEventListener("pointercancel", endTouch);
 
   app.canvas.addEventListener("pointerdown", (e) => {
+    if (!toolMenu.hidden) {
+      toolMenu.hidden = true;
+      return;
+    }
     if (e.pointerType === "touch") {
       touches.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
       if (touches.size === 2) {
@@ -1466,7 +1612,13 @@ async function main() {
       return;
     }
     // The keyboard crew follows the mouse, so the keypad carries on from the last tile touched.
-    if (e.button === 0 && tool !== "garage") {
+    if (e.button === 0 && tool === "look" && e.pointerType === "touch") {
+      // Looking around with a finger: the flag stays where building carries on from.
+      if (!lookHintShown && fleet.garages.length > 0) {
+        lookHintShown = true;
+        showToast(`👀 Du ser deg rundt. Trykk 👀▴ nederst til venstre og velg ⛷ Bygg løype for å bygge.`);
+      }
+    } else if (e.button === 0 && tool !== "garage") {
       [crew.x, crew.y] = tileAt(e.offsetX, e.offsetY);
     }
     if (e.button === 0 && tool === "garage") {
@@ -1615,6 +1767,8 @@ async function main() {
 
   const setTool = (t: Tool) => {
     tool = t;
+    toolMenu.hidden = true;
+    clearPlan();
     refreshHud();
   };
   for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-tool]")) {
@@ -1710,6 +1864,8 @@ async function main() {
       showReport(false);
       showPaper(false);
       kioskPanel.hidden = true;
+      toolMenu.hidden = true;
+      clearPlan();
     } else {
       const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage" } as Record<string, Tool>)[e.code];
       if (!t) {

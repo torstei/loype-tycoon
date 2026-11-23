@@ -181,11 +181,16 @@ top, the tools as a single scrolling row of icons at the bottom (with zoom and f
 buttons) that ▾ tucks away together with the snowcat panel and 🛠 brings back, panels across
 the full width, and tile info on tap instead of hover, fading after a few seconds.
 
-Touch gestures: with the build tool a tap lays track in a straight line from the red flag
-(the track crew: at the garage at first, then wherever the last track ended) to the tapped
-spot, up to 30 tiles; tapping existing track moves the flag there to branch off, and ↶ (or
+Touch gestures: with the build tool a tap (or a long press) plans track in a straight line
+from the red flag (the track crew: at the garage at first, then wherever the last track
+ended) to the tapped spot, up to 30 tiles. The plan shows on the map — green for new track,
+yellow where it crosses a road or the railway, a red cross where it has to stop — with the
+number of tiles, the price and each crossing named, and is only laid on "Lag løype"
+("Avbryt" drops it); crossing dialogs come up on the way and building carries on after each; tapping existing track moves the flag there to branch off, and ↶ (or
 Ctrl/Cmd+Z) takes back the last stroke and its cost. A finger that moves before lifting
-drags track as with a mouse; 👀 pans with one finger. Two fingers pan and pinch-zoom in any
+drags track as with a mouse; 👀 pans with one finger, and a tap there only shows the tile
+without moving the flag. On compact screens the four tools sit behind one button showing the
+current tool (⛷▴); tapping it opens a menu with all four by name. Two fingers pan and pinch-zoom in any
 tool. The zoom is free while pinching and settles on the nearest zoom step when the fingers
 lift. If the first finger has laid a tile or two before the second lands, that stroke is
 undone and refunded.
