@@ -29,7 +29,8 @@ Controls (press `H` in the game for the full list):
 
 - **Where it all starts**: the game opens by choosing where the club keeps its garage —
   anywhere near a station, car park or residential area (shown as green rings). The first
-  garage is free, since the club already owns Gamle Gunnar; time starts once it is placed.
+  garage is free, since the club already owns Gamle Gunnar. Time stands still until the first
+  track is laid, then starts by itself; while paused, a banner says so and resumes on a click.
   Keyboard players can walk the crew there and press Enter.
 - **Track grows from the network**, as in the old tycoon games: the first track starts at the
   garage, and every new piece after that has to connect to track you already have. With the
