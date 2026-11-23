@@ -137,11 +137,24 @@ def overpass_query(bbox_ll):
 out geom;"""
 
 
-def fetch_osm(region, bbox_ll):
-    path = CACHE / f"{region.cache_key}-osm.json"
+def cabin_query(bbox_ll):
+    """Huts, serviced cabins and cafés: places a ski track can lead to."""
+    s, w, n, e = bbox_ll
+    bb = f"({s},{w},{n},{e})"
+    return f"""[out:json][timeout:120];
+(
+  nwr["tourism"~"^(alpine_hut|wilderness_hut|guest_house|hostel|chalet)$"]{bb};
+  nwr["amenity"~"^(cafe|restaurant)$"]{bb};
+  nwr["building"="cabin"]["name"]{bb};
+);
+out center tags;"""
+
+
+def fetch_osm(region, bbox_ll, query_fn=None, suffix="osm"):
+    path = CACHE / f"{region.cache_key}-{suffix}.json"
     if path.exists():
         return json.loads(path.read_text())
-    query = overpass_query(bbox_ll)
+    query = (query_fn or overpass_query)(bbox_ll)
     delay = 5
     for attempt in range(8):
         endpoint = OVERPASS_ENDPOINTS[attempt % len(OVERPASS_ENDPOINTS)]
@@ -425,6 +438,26 @@ def poi_at(pt_ll, kind, name, to_utm, region):
     return {"kind": kind, "name": name, "x": col, "y": row}
 
 
+SERVED = {"alpine_hut", "wilderness_hut", "guest_house", "hostel", "cafe", "restaurant"}
+
+
+def cabin_pois(region, data):
+    """Named places to ski to: "cafe" where someone serves food, "cabin" for a cabin that is just a landmark."""
+    to_utm = Transformer.from_crs("EPSG:4326", CRS, always_xy=True).transform
+    out = []
+    for el in data["elements"]:
+        tags = el.get("tags", {})
+        name = tags.get("name")
+        at = el.get("center") or el
+        if not name or "lat" not in at:
+            continue
+        served = tags.get("tourism") in SERVED or tags.get("amenity") in SERVED
+        p = poi_at(Point(at["lon"], at["lat"]), "cafe" if served else "cabin", name, to_utm, region)
+        if p:
+            out.append(p)
+    return out
+
+
 def bbox_latlon(region):
     to_ll = Transformer.from_crs(CRS, "EPSG:4326", always_xy=True).transform
     xs = [region.min_x, region.max_x]
@@ -484,8 +517,10 @@ def main():
 
     print(f"{region.title}: {region.cols}x{region.rows} tiles of {GRID_M} m", file=sys.stderr)
     osm = fetch_osm(region, bbox_latlon(region))
+    cabins = fetch_osm(region, bbox_latlon(region), cabin_query, "cabins")
     elev = fetch_dtm(region)
     terrain, flags, pois, lines = build_layers(region, osm)
+    pois += cabin_pois(region, cabins)
 
     doc = {
         "name": region.name,

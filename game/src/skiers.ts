@@ -58,6 +58,10 @@ const COMPLAINTS = {
 };
 
 const MAX_VERDICTS = 5000;
+/** A trip to a cabin is that much better. */
+const CABIN_BONUS = 1.15;
+/** How much more likely a skier takes the turn that leads towards a cabin they can still reach. */
+const CABIN_PULL = 3;
 
 function pick<T>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];
@@ -216,6 +220,8 @@ class Skier {
   private readonly visited = new Set<number>();
   /** Road and rail tiles crossed on the level this trip. */
   private readonly crossed = new Set<number>();
+  /** Skied to a cabin on this trip: a trip with somewhere to go is a better trip. */
+  visitedCabin = false;
   /** Has walked past a waffle stand on this trip, bought or not. */
   readonly passedKiosks = new Set<Kiosk>();
   private travelled = 0;
@@ -249,7 +255,7 @@ class Skier {
     return [Math.floor(this.px), Math.floor(this.py)];
   }
 
-  update(hours: number, map: GameMap, tracks: TrackNetwork, weather: Weather, say: (s: Skier, text: string) => void) {
+  update(hours: number, map: GameMap, tracks: TrackNetwork, weather: Weather, say: (s: Skier, text: string) => void, cabins: [number, number][] = []) {
     if (this.waiting > 0) {
       const w = Math.min(this.waiting, hours);
       this.waiting -= w;
@@ -273,11 +279,11 @@ class Skier {
       this.py = cy;
       budget -= dist;
       this.stride += dist * 2.2;
-      this.arrive(map, tracks, weather, say);
+      this.arrive(map, tracks, weather, say, cabins);
     }
   }
 
-  private arrive(map: GameMap, tracks: TrackNetwork, weather: Weather, say: (s: Skier, text: string) => void) {
+  private arrive(map: GameMap, tracks: TrackNetwork, weather: Weather, say: (s: Skier, text: string) => void, cabins: [number, number][]) {
     const [x, y] = this.target;
     if (!tracks.has(x, y)) {
       this.finish(0.2);
@@ -339,10 +345,15 @@ class Skier {
       return;
     }
     const here = map.elevationAt(x, y);
+    // A cabin within reach before the turn for home pulls the skier towards it.
+    const toCabin = (px: number, py: number) => Math.min(...cabins.map(([cx, cy]) => Math.hypot(cx - px, cy - py)));
+    const cabinHere = !this.visitedCabin && cabins.length > 0 ? toCabin(x, y) : Infinity;
+    const drawn = cabinHere <= this.goal / 2 - this.travelled + KIOSK_REACH;
     const weights = choices.map(([nx, ny]) => {
       const fresh = this.visited.has(map.index(nx, ny)) ? 0.25 : 1;
       const climb = Math.max(0, map.elevationAt(nx, ny) - here) / map.tileSize;
-      return Math.pow(0.15 + tracks.quality(nx, ny, weather), 2) * fresh * Math.exp(-climb * 10 * this.kind.slopeDislike);
+      const pull = drawn && toCabin(nx, ny) < cabinHere ? CABIN_PULL : 1;
+      return Math.pow(0.15 + tracks.quality(nx, ny, weather), 2) * fresh * Math.exp(-climb * 10 * this.kind.slopeDislike) * pull;
     });
     let r = Math.random() * weights.reduce((a, b) => a + b, 0);
     let chosen = choices[choices.length - 1];
@@ -363,8 +374,9 @@ class Skier {
     const avg = this.travelled > 0 ? this.qualitySum / this.travelled : 0;
     const variety = this.travelled > 0 ? Math.min(1, (this.visited.size / this.travelled) * 1.8) : 0;
     const longEnough = Math.min(1, this.travelled / this.goal + 0.3);
-    this.satisfaction = Math.max(0, Math.min(1, avg * (0.7 + 0.3 * variety) * longEnough * penalty * this.roadMood));
-    this.verdict = { kind: this.kind.name, quality: avg, variety, longEnough, penalty, roadMood: this.roadMood, travelled: this.travelled, goal: this.goal };
+    const destination = this.visitedCabin ? CABIN_BONUS : 1;
+    this.satisfaction = Math.max(0, Math.min(1, avg * (0.7 + 0.3 * variety) * longEnough * penalty * this.roadMood * destination));
+    this.verdict = { kind: this.kind.name, quality: avg, variety, longEnough, penalty, roadMood: this.roadMood, travelled: this.travelled, goal: this.goal, cabin: this.visitedCabin };
   }
 
   /** What went into the satisfaction, for balancing runs. */
@@ -494,6 +506,7 @@ export interface TripVerdict {
   roadMood: number;
   travelled: number;
   goal: number;
+  cabin: boolean;
 }
 
 /** Per kind of skier: how many finished a trip, how many were happy, and the averages of what made the verdict. */
@@ -659,8 +672,9 @@ export class Crowd {
     }
 
     const say = (s: Skier, text: string) => this.say(s, text);
+    const cabins = this.kiosks.filter((k) => k.kind === "cabin").map((k) => k.spot);
     for (const s of this.skiers) {
-      s.update(hours, this.map, tracks, weather, say);
+      s.update(hours, this.map, tracks, weather, say, cabins);
     }
     for (const s of this.skiers.filter((s) => s.done)) {
       this.leave(s);
@@ -671,6 +685,14 @@ export class Crowd {
   /** Skiers passing an open stand may stop for a waffle: once per stand per trip. */
   private sellWaffles(clock: GameClock, weather: Weather) {
     for (const k of this.kiosks) {
+      if (k.kind === "cabin") {
+        const [cx, cy] = k.spot;
+        for (const s of this.skiers) {
+          if (!s.visitedCabin && Math.hypot(s.px - (cx + 0.5), s.py - (cy + 0.5)) <= KIOSK_REACH) {
+            s.visitedCabin = true;
+          }
+        }
+      }
       if (!k.isOpen(clock.day, clock.hourOfDay)) {
         continue;
       }

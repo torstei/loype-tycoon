@@ -1,7 +1,7 @@
 import { Flag, Terrain } from "./terrain";
 
 export interface Poi {
-  kind: "station" | "parking" | "peak" | "place";
+  kind: "station" | "parking" | "peak" | "place" | "cafe" | "cabin";
   name: string | null;
   x: number;
   y: number;
