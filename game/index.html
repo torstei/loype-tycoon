@@ -4,6 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Løype Tycoon</title>
+    <script>
+      // The game's own code was not found (a page cached from before the last deploy): reload once.
+      window.addEventListener("error", function (e) {
+        var t = e.target;
+        if (!t || t.tagName !== "SCRIPT") return;
+        var giveUp = function () {
+          var show = function () {
+            var box = document.getElementById("loading");
+            if (box) box.innerHTML = 'Klarte ikke å laste spillet. <button onclick="location.reload()">Last inn på nytt</button>';
+          };
+          if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", show);
+          else show();
+        };
+        try {
+          var last = Number(sessionStorage.getItem("loype-tycoon:reloaded-at") || 0);
+          if (Date.now() - last < 60000) return giveUp();
+          sessionStorage.setItem("loype-tycoon:reloaded-at", String(Date.now()));
+        } catch (_) {
+          return giveUp();
+        }
+        location.reload();
+      }, true);
+    </script>
   </head>
   <body>
     <div id="stage"></div>
