@@ -282,7 +282,8 @@ export class TrackNetwork {
     }
     const depth = weather.snowDepthAt(this.map.elevationAt(x, y));
     const snowFactor = Math.min(1, depth / MIN_GROOMING_DEPTH);
-    const buried = 1 - Math.min(1, this.newSnow[i] / 10);
+    // Skis still run in a snowed-in track, just slower: half as good at worst.
+    const buried = 1 - 0.5 * Math.min(1, this.newSnow[i] / 15);
     return this.fresh[i] * buried * (1 - 0.6 * this.ice[i]) * snowFactor;
   }
 

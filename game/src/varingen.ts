@@ -1,4 +1,5 @@
 import { dayLabel } from "./clock";
+import { SurveyTally } from "./skiers";
 import { Weather } from "./weather";
 
 /** What the paper remembers about one day, logged when the day ends. */
@@ -52,6 +53,8 @@ export interface EditionInput {
   place: string;
   weather: Weather;
   lowest: number;
+  /** What each kind of skier thought since the last edition. */
+  survey: SurveyTally[];
 }
 
 /** Varingen comes out on Thursdays. */
@@ -386,6 +389,44 @@ const RAIL = [
 
 const fmt = (n: number) => n.toFixed(0);
 
+const SURVEY_ORDER: [string, string][] = [["søndagsfamilie", "👨‍👩‍👧 Søndagsfamilier"], ["mosjonist", "🎿 Mosjonister"], ["lycraløper", "⚡ Lycraløpere"]];
+
+/** What each kind of skier (family, fitness, racer, in SURVEY_ORDER) says about whatever pulled their verdict down most. */
+const SURVEY_QUOTES: Record<"quality" | "roadMood" | "longEnough" | "variety" | "praise", [string, string, string]> = {
+  quality: ["Ungene ga opp etter første bakke. Sporet var borte.", "Sporet var slitt og nedsnødd. Kjør maskina oftere, så kommer jeg oftere.", "Glid? Hvilket glid? Det er jo ikke spor engang."],
+  roadMood: ["Å krysse veien med tre unger og et akebrett er ingen spøk.", "Jeg kom for å gå på ski, ikke for å stå ved et fotgjengerfelt.", "For mange veier å krysse. Bygg ei bru!"],
+  longEnough: ["Litt kort, men de minste syntes det var nok.", "Fint, men altfor kort.", "Ferdig på en halvtime. Vi trenger lengre løyper."],
+  variety: ["Ungene spurte om vi ikke hadde vært her før.", "Rundt og rundt i samme sløyfe. Jeg ble svimmel.", "Jeg kjenner hver eneste gran nå."],
+  praise: ["Perfekt for hele familien!", "Beste sporet i bygda.", "Endelig noe å trene på. Kommer igjen i morgen."],
+};
+
+/** The weekly survey: how happy each kind of skier is, and what they would change. */
+function surveyBox(survey: SurveyTally[]): string {
+  const asked = survey.reduce((s, t) => s + t.n, 0);
+  if (asked < 10) {
+    return "";
+  }
+  const rows = SURVEY_ORDER.map(([kind, label], i) => {
+    const t = survey.find((s) => s.kind === kind);
+    if (!t || t.n < 5) {
+      return `<div class="row"><span class="who">${label}</span><span class="pct">–</span><p class="quote">For få svar.</p></div>`;
+    }
+    const share = Math.round(t.satisfaction * 100);
+    const weak = ([
+      ["quality", t.quality, 0.8],
+      ["roadMood", t.roadMood, 0.95],
+      ["longEnough", t.longEnough, 0.9],
+      ["variety", t.variety, 0.85],
+    ] as const)
+      .filter(([, value, limit]) => value < limit)
+      .sort((a, b) => a[1] / a[2] - b[1] / b[2])[0];
+    const quote = SURVEY_QUOTES[weak ? weak[0] : "praise"][i];
+    return `<div class="row"><span class="who">${label}</span><span class="bar"><span style="width:${share}%"></span></span><span class="pct">${share} %</span><p class="quote">«${quote}»</p></div>`;
+  }).join("");
+  return `<article class="survey"><div class="kicker">Varingen spør</div><h3>Hvor fornøyd er du med løypene?</h3>${rows}
+    <p class="method">Varingen spurte ${asked.toLocaleString("nb-NO")} skiløpere ved parkeringen. Hvor fornøyd de var med turen, i snitt.</p></article>`;
+}
+
 /** Write the week's paper: the biggest story on the front, a few briefs, and the regular columns. */
 export function writeEdition(input: EditionInput): Edition {
   const { day, number, weather } = input;
@@ -418,6 +459,7 @@ export function writeEdition(input: EditionInput): Edition {
       <article class="brief snow"><div class="kicker">Snømåling</div>
         <p>Hakadal: <strong>${fmt(hakadal)} cm</strong><br>Rotnes: <strong>${fmt(rotnes)} cm</strong>${rotnes < 3 ? " (og en kjegle)" : ""}</p></article>
     </div>
+    ${surveyBox(input.survey)}
     <article class="letter"><div class="kicker">Leserbrev</div><p>«${letter.text}»</p><p class="from">— ${letter.from}</p>
       ${letter.reply ? `<p class="reply">${letter.reply}</p>` : ""}</article>`;
 
