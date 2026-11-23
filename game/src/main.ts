@@ -78,6 +78,10 @@ const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
 /** On a phone the tile info goes away by itself, since there is no pointer leaving to hide it. */
 const COMPACT_INFO_MS = 5000;
+/** How far a finger may move, in screen pixels, and still count as a tap. */
+const TOUCH_SLOP = 10;
+/** A tap lays a straight line from the crew up to this many tiles away. */
+const TAP_REACH = 30;
 /** A stroke this short when a second finger lands was the start of a pinch, not a track. */
 const SHORT_STROKE = 3;
 /** How far from the network a drag may start and still be linked up automatically, in tiles. */
@@ -308,6 +312,7 @@ async function main() {
     placePanels();
   };
   document.getElementById("bar-hide")!.addEventListener("click", () => setBarHidden(true));
+  document.getElementById("undo")!.addEventListener("click", () => undoLastStroke());
   document.getElementById("bar-show")!.addEventListener("click", () => setBarHidden(false));
   try {
     setBarHidden(localStorage.getItem(BAR_HIDDEN) === "1");
@@ -1051,7 +1056,7 @@ async function main() {
       crew.y = y;
       setTool("build");
       showToast(`🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! ${document.documentElement.classList.contains("compact")
-        ? "Bygg den første løypa ved å dra med én finger ut fra garasjen. To fingre flytter og zoomer kartet."
+        ? "Trykk der løypa skal gå: den legges i rett linje fra det røde flagget, som nå står ved garasjen. Du kan også dra med én finger. To fingre flytter og zoomer kartet, og ↶ angrer."
         : "Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S."} Tiden starter når den første løypa er lagt.`);
     } else {
       setTool("look");
@@ -1267,6 +1272,110 @@ async function main() {
   };
 
   let stroke: { x: number; y: number; paid: number }[] = [];
+  /** The last finished stroke, for undo. */
+  let lastStroke: { x: number; y: number; paid: number }[] = [];
+  /** A finger that has touched down with a building tool but not yet tapped, dragged or pinched. */
+  let pendingTouch: { sx: number; sy: number; tile: [number, number] } | null = null;
+
+  /** Start a stroke on a tile: linked to the network if it starts just beside it, refused with a pointer if too far. */
+  const beginStroke = (px: number, py: number): boolean => {
+    painting = [px, py];
+    stroke = [];
+    strokeCrossing = null;
+    strokeRefused = false;
+    if (tool === "build" && !tracks.has(px, py) && tracks.cost(px, py) !== null && connectionProblem(px, py) && fleet.garages.length > 0) {
+      const link = connector(px, py);
+      if (link) {
+        for (const [lx, ly] of link) {
+          paintStep(lx, ly);
+        }
+      } else {
+        const anchor = nearestAnchor(px, py);
+        if (anchor) {
+          hint = { from: [px, py], to: anchor, ttl: 3 };
+          showToast(`${connectionProblem(px, py)}. ${tracks.size > 0 ? "Nærmeste løype er markert — start derfra." : "Garasjen er markert."}`);
+        }
+        painting = null;
+        return false;
+      }
+    }
+    paintStep(px, py);
+    redrawTracks();
+    refreshHud();
+    return true;
+  };
+
+  /**
+   * A tap with a finger. Building: on track it picks where to carry on from; elsewhere it lays a
+   * straight line from the crew, when the crew stands on track close enough, or starts a stroke there.
+   */
+  const tapTile = (tx: number, ty: number) => {
+    if (tool === "remove") {
+      [crew.x, crew.y] = [tx, ty];
+      if (tracks.has(tx, ty)) {
+        beginStroke(tx, ty);
+        lastStroke = [];
+        painting = null;
+      }
+      return;
+    }
+    if (tracks.has(tx, ty)) {
+      [crew.x, crew.y] = [tx, ty];
+      return;
+    }
+    // Build from the flag when it stands on track or at the garage; otherwise from the nearest track.
+    const atGarage = fleet.garages.some((g) => g.x === crew.x && g.y === crew.y);
+    const from: [number, number] | null = tracks.has(crew.x, crew.y) || (atGarage && tracks.size === 0) ? [crew.x, crew.y] : nearestAnchor(tx, ty);
+    const reach = from ? Math.max(Math.abs(tx - from[0]), Math.abs(ty - from[1])) : Infinity;
+    if (from && reach > TAP_REACH) {
+      hint = { from: [tx, ty], to: from, ttl: 3 };
+      showRefusal(tx, ty, `For langt — maks ${TAP_REACH} ruter per trykk`);
+      return;
+    }
+    if (from) {
+      painting = from;
+      stroke = [];
+      strokeCrossing = null;
+      strokeRefused = false;
+      for (const [lx, ly] of [...lineTiles(from[0], from[1], tx, ty)].slice(1)) {
+        paintStep(lx, ly);
+        if (!painting) {
+          break;
+        }
+      }
+    } else {
+      beginStroke(tx, ty);
+    }
+    if (stroke.length > 0) {
+      lastStroke = stroke.slice();
+    }
+    painting = null;
+    redrawTracks();
+    refreshHud();
+  };
+
+  /** Take back the last stroke and the money it cost. */
+  const undoLastStroke = () => {
+    const undone = lastStroke.filter(({ x, y, paid }) => paid > 0 && tracks.has(x, y));
+    if (undone.length === 0) {
+      showToast("Ingenting å angre.");
+      return;
+    }
+    let refund = 0;
+    for (const { x, y, paid } of undone) {
+      tracks.remove(x, y);
+      refund += paid;
+    }
+    budget += refund;
+    lastStroke = [];
+    const back = [...tracks.each()].sort((a, b) => Math.hypot(a[0] - undone[0].x, a[1] - undone[0].y) - Math.hypot(b[0] - undone[0].x, b[1] - undone[0].y))[0];
+    if (back) {
+      [crew.x, crew.y] = back;
+    }
+    showToast(`↶ Angret ${undone.length} løyperute${undone.length === 1 ? "" : "r"}, <span class="plus">+${kr(refund)}</span> tilbake.`);
+    redrawTracks();
+    refreshHud();
+  };
   /** Only the first refusal in a drag is shown: everything after it is just "not connected". */
   let strokeRefused = false;
   let painting: [number, number] | null = null;
@@ -1315,6 +1424,7 @@ async function main() {
   };
 
   const startPinch = () => {
+    pendingTouch = null;
     undoShortStroke();
     painting = null;
     panning = null;
@@ -1349,6 +1459,12 @@ async function main() {
     if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
       return;
     }
+    const fingerTool = e.pointerType === "touch" && (tool === "build" || tool === "remove");
+    if (e.button === 0 && fingerTool) {
+      // A finger may be about to tap, drag or pinch: wait and see before laying anything.
+      pendingTouch = { sx: e.offsetX, sy: e.offsetY, tile: tileAt(e.offsetX, e.offsetY) };
+      return;
+    }
     // The keyboard crew follows the mouse, so the keypad carries on from the last tile touched.
     if (e.button === 0 && tool !== "garage") {
       [crew.x, crew.y] = tileAt(e.offsetX, e.offsetY);
@@ -1358,35 +1474,19 @@ async function main() {
       return;
     }
     if (e.button === 0 && tool !== "look") {
-      painting = tileAt(e.offsetX, e.offsetY);
-      stroke = [];
-      strokeCrossing = null;
-      strokeRefused = false;
-      const [px, py] = painting;
-      if (tool === "build" && !tracks.has(px, py) && tracks.cost(px, py) !== null && connectionProblem(px, py) && fleet.garages.length > 0) {
-        const link = connector(px, py);
-        if (link) {
-          for (const [lx, ly] of link) {
-            paintStep(lx, ly);
-          }
-        } else {
-          const anchor = nearestAnchor(px, py);
-          if (anchor) {
-            hint = { from: [px, py], to: anchor, ttl: 3 };
-            showToast(`${connectionProblem(px, py)}. ${tracks.size > 0 ? "Nærmeste løype er markert — start draget derfra." : "Garasjen er markert."}`);
-          }
-          painting = null;
-          return;
-        }
-      }
-      paintStep(...painting);
-      redrawTracks();
-      refreshHud();
+      beginStroke(...tileAt(e.offsetX, e.offsetY));
     } else {
       panning = { x: e.clientX, y: e.clientY };
     }
   });
   window.addEventListener("pointerup", () => {
+    if (pendingTouch && !pinch) {
+      tapTile(...pendingTouch.tile);
+    }
+    pendingTouch = null;
+    if (painting && stroke.length > 0) {
+      lastStroke = stroke.slice();
+    }
     painting = null;
     panning = null;
   });
@@ -1405,6 +1505,12 @@ async function main() {
     }
     const [x, y] = tileAt(e.offsetX, e.offsetY);
     describe(x, y);
+    if (pendingTouch && Math.hypot(e.offsetX - pendingTouch.sx, e.offsetY - pendingTouch.sy) > TOUCH_SLOP) {
+      const [sx, sy] = pendingTouch.tile;
+      pendingTouch = null;
+      [crew.x, crew.y] = [sx, sy];
+      beginStroke(sx, sy);
+    }
     if (panning) {
       camera.pan(e.clientX - panning.x, e.clientY - panning.y);
       panning = { x: e.clientX, y: e.clientY };
@@ -1555,6 +1661,11 @@ async function main() {
   groomButton.addEventListener("click", toggleGroomMap);
   const help = document.getElementById("help")!;
   window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyZ" && (e.ctrlKey || e.metaKey) && !e.altKey) {
+      undoLastStroke();
+      e.preventDefault();
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) {
       return;
     }
