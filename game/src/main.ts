@@ -1,13 +1,15 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, GameClock, holiday, isWeekend, SPEEDS, weekday } from "./clock";
-import { Fleet, GARAGE_REACH } from "./groomer";
+import { COST_PER_TILE, Fleet, GARAGE_REACH } from "./groomer";
+import { accountsHtml, DayAccount } from "./accounts";
 import { areas, Report, writeReport } from "./report";
 import { CABIN_REACH, CABIN_TIERS, EXPERTS, Kiosk, KIOSK_TIERS, OutletKind } from "./kiosk";
 import { showTouchTips, touchOnly } from "./mobile";
 import { showStartupError, watchForStaleBuild } from "./startup";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
 import {
+  AccountRow,
   decodeTracks,
   deleteSlot,
   download,
@@ -24,7 +26,7 @@ import {
   writeSlot,
 } from "./savegame";
 import { Skijorer } from "./skijor";
-import { Crowd, DayStats, emptyDay } from "./skiers";
+import { Crowd, DayStats, emptyDay, MEMBERSHIP_FEE, Trailhead } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
@@ -439,7 +441,7 @@ async function main() {
       <strong class="title">Løype Tycoon · ${map.title}</strong>
       <span class="clock">${clock.paused ? "⏸ " : ""}${clock.label()}</span>
       <span class="weather">${nowIcon} <span class="wide-only">${weather.temperature.toFixed(0)} °C · snø ${weather.snowDepth.toFixed(0)} cm</span><span class="compact-only">${weather.temperature.toFixed(0)}°</span></span>
-      <span class="cash"><span class="wide-only">Kasse: </span>${kr(budget)}</span>
+      <button class="cash" title="Regnskap (K)"><span class="wide-only">Kasse: </span>${kr(budget)}</button>
       <span class="skiers">⛷ ${crowd.today.skiers}<span class="wide-only"> i dag · omdømme ${Math.round(crowd.reputation * 100)} %</span></span>
       <span class="km wide-only">Løypenett: ${km.toFixed(2)} km</span>
       <span class="mode wide-only ${crew.building ? "on" : ""}">Tråkkemodus: ${crew.building ? "PÅ" : "av"}</span>
@@ -800,7 +802,48 @@ async function main() {
   };
 
   /** One row per finished day, for balancing runs. */
-  const history: { day: number; skiers: number; happy: number | null; donations: number; members: number; waffles: number; waffleIncome: number; diesel: number; power: number; guests: number; rooms: number; budget: number; reputation: number; tiles: number }[] = [];
+  /** One row per finished day: the season's account, and what balancing runs read. */
+  let history: AccountRow[] = [];
+  /** The cash at the start of today; what it has moved by beyond income and running costs went to building. */
+  let dayStartBudget = START_BUDGET;
+  const accountOf = (r: { donations: number; members: number; waffleIncome: number; rooms: number; diesel: number; power: number; built: number }): DayAccount => ({
+    donations: r.donations,
+    members: r.members * MEMBERSHIP_FEE,
+    waffles: r.waffleIncome,
+    rooms: r.rooms,
+    diesel: r.diesel,
+    power: r.power,
+    built: r.built,
+  });
+  const builtSince = (start: number, income: number, running: number) => start + income - running - budget;
+  const accountsPanel = document.getElementById("accounts")!;
+  const renderAccounts = () => {
+    const t = crowd.today;
+    const today = { donations: t.donations, members: t.members, waffleIncome: t.waffleIncome, rooms: 0, diesel: dieselToday, power: 0, built: 0 };
+    today.built = builtSince(dayStartBudget, t.donations + t.members * MEMBERSHIP_FEE + t.waffleIncome, dieselToday);
+    accountsPanel.innerHTML = accountsHtml(history.map(accountOf), accountOf(today), {
+      km: (tracks.size * map.tileSize) / 1000,
+      dieselPerKm: (COST_PER_TILE * 1000) / map.tileSize,
+      connected: crowd.trailheads.filter((h) => h.entry).length,
+      skiersThisSeason: history.reduce((s, r) => s + r.skiers, 0) + t.skiers,
+    });
+  };
+  const showAccounts = (open: boolean) => {
+    accountsPanel.hidden = !open;
+    if (open) {
+      renderAccounts();
+    }
+  };
+  hud.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest(".cash")) {
+      showAccounts(accountsPanel.hidden);
+    }
+  });
+  accountsPanel.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("[data-accounts='close']")) {
+      showAccounts(false);
+    }
+  });
 
   const closeDay = (day: number) => {
     yesterdayHyped = crowd.hype;
@@ -828,13 +871,18 @@ async function main() {
       budget,
       reputation: crowd.reputation,
       tiles: tracks.size,
+      built: builtSince(dayStartBudget, stats.donations + stats.members * MEMBERSHIP_FEE + stats.waffleIncome + rooms, diesel + power),
     });
+    dayStartBudget = budget;
+    if (!accountsPanel.hidden) {
+      renderAccounts();
+    }
     if (stats.skiers === 0 && diesel === 0) {
       return;
     }
     showToast(`<strong>${dayLabel(day)}:</strong> ${stats.skiers} skiløpere · ${happy} % fornøyde ·
       Vipps <span class="plus">+${kr(stats.donations)}</span>
-      ${stats.members > 0 ? `· ${stats.members} nye medlemmer <span class="plus">+${kr(stats.members * 400)}</span>` : ""}
+      ${stats.members > 0 ? `· ${stats.members} nye medlemmer <span class="plus">+${kr(stats.members * MEMBERSHIP_FEE)}</span>` : ""}
       ${stats.waffles > 0 ? `· 🧇 ${stats.waffles} vafler <span class="plus">+${kr(stats.waffleIncome)}</span>` : ""}
       · diesel <span class="minus">−${kr(diesel)}</span>
       ${guests > 0 ? `· 🛏 ${guests} gjester <span class="plus">+${kr(rooms)}</span>` : ""}
@@ -1108,9 +1156,16 @@ async function main() {
   };
 
   let trailheadSignature = "";
+  /** Trailheads connected at the last refresh; null until the first one, so loading a game announces nothing. */
+  let knownHeads: Set<Trailhead> | null = null;
   const refreshTrailheads = () => {
     crowd.connect(tracks);
     const connected = crowd.trailheads.filter((h) => h.entry);
+    const fresh = knownHeads ? connected.filter((h) => !knownHeads!.has(h)) : [];
+    knownHeads = new Set(connected);
+    if (fresh.length > 0 && timeStarted) {
+      showToast(`⛷ Løypa når nå fram til <strong>${fresh.map((h) => h.name).join(" og ")}</strong>. Derfra kommer det flere skiløpere!`);
+    }
     const choosingHome = fleet.garages.length === 0;
     const starting = tracks.size === 0;
     const signature = choosingHome ? "home" : starting ? "start" : connected.map((h) => `${h.x},${h.y}`).join(";");
@@ -1831,6 +1886,11 @@ async function main() {
             : `Krysser Gjøvikbanen: krever undergang til ${kr(crossingOptions("rail", 0)[0].price)}.`;
         });
       lines.push(...new Set(named));
+      const reached = crowd.trailheads.filter((h) => !h.entry && fresh.some((t) => Math.hypot(t.x - h.x, t.y - h.y) <= h.reach));
+      lines.push(reached.length
+        ? `<span class="plus">⛷ Når fram til ${reached.map((h) => h.name).join(" og ")}: flere skiløpere!</span>`
+        : "Når ingen nye stasjoner, parkeringer eller boligfelt.");
+      lines.push(`⛽ ${kr(fresh.length * COST_PER_TILE)} mer i diesel hver gang løypa preppes.`);
       if (blocked) {
         lines.push(`Stopper før: ${(blocked.reason ?? "noe som ikke kan bygges over").toLowerCase()}.`);
       }
@@ -2292,6 +2352,8 @@ async function main() {
       placeGarage(crew.x, crew.y);
     } else if (e.code === "KeyM") {
       toggleMenu();
+    } else if (e.code === "KeyK") {
+      showAccounts(accountsPanel.hidden);
     } else if (e.code === "KeyF") {
       showReport(reportPanel.hidden);
     } else if (e.code === "KeyV") {
@@ -2300,6 +2362,7 @@ async function main() {
       help.hidden = !help.hidden;
     } else if (e.code === "Escape") {
       help.hidden = true;
+      showAccounts(false);
       showReport(false);
       showPaper(false);
       kioskPanel.hidden = true;
@@ -2342,6 +2405,7 @@ async function main() {
     reports: reports.map(({ report, rosy }) => ({ ...report, rosyChosen: rosy })),
     crew: map.toGrid(crew.x, crew.y),
     varingen: { ...paper, press: crowd.press, roadsToday, snowToday, rainToday },
+    accounts: { history, dayStartBudget },
   });
 
   /** Rebuild a saved game on this freshly started page. Returns what to tell the player. */
@@ -2351,6 +2415,9 @@ async function main() {
     clock.speedIndex = save.clock.speedIndex;
     clock.paused = true;
     budget = save.budget;
+    history = save.accounts?.history ?? [];
+    knownHeads = null;
+    dayStartBudget = save.accounts?.dayStartBudget ?? save.budget;
     crowd.reputation = save.reputation;
     crowd.today = { ...emptyDay(), ...save.today };
     crowd.hype = save.hype;
@@ -2452,6 +2519,7 @@ async function main() {
       <div class="head"><strong>💾 Spill</strong><button data-menu="close">✕</button></div>
       <table>${rows}</table>
       <div class="actions">
+        <button data-menu="accounts">📒 Regnskap</button>
         <button data-menu="export">Lagre til fil</button>
         <button data-menu="import">Hent fra fil</button>
         <button data-menu="new" class="danger">Nytt spill</button>
@@ -2488,6 +2556,9 @@ async function main() {
       reload();
     } else if (action === "close") {
       toggleMenu(false);
+    } else if (action === "accounts") {
+      toggleMenu(false);
+      showAccounts(true);
     } else if (action === "export") {
       download(snapshot());
     } else if (action === "import") {

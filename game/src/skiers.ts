@@ -495,7 +495,7 @@ export function findTrailheads(map: GameMap): Trailhead[] {
   return heads;
 }
 
-const MEMBERSHIP_FEE = 400;
+export const MEMBERSHIP_FEE = 400;
 
 export interface TripVerdict {
   kind: string;
