@@ -267,7 +267,7 @@ html.compact #tools #tool-menu-button { background: #1f5fd1; color: #fff; border
 #build-plan .actions { display: flex; gap: 8px; margin-top: 8px; }
 #build-plan button { flex: 1; font: inherit; font-weight: 700; padding: 10px; border-radius: 10px; border: 2px solid #2fa84f;
   background: #fff; color: #1f6f36; cursor: pointer; }
-#build-plan button[data-plan="build"] { background: #2fa84f; color: #fff; }
+#build-plan button[data-plan="build"], #build-plan button[data-plan="place"] { background: #2fa84f; color: #fff; }
 html.touch #tool-menu [data-tool="look"] { display: none; }
 #toast button.read { font: inherit; font-weight: 700; margin-left: 6px; padding: 3px 10px; border-radius: 8px;
   border: 2px solid #23323d; background: #23323d; color: #fff; cursor: pointer; }

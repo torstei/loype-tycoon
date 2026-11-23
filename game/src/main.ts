@@ -1660,8 +1660,28 @@ async function main() {
    * straight line from the crew, when the crew stands on track close enough, or starts a stroke there.
    */
   const tapTile = (tx: number, ty: number) => {
-    if (CABIN_TOOL_TIER[tool] !== undefined) {
-      cabinTool(tx, ty, CABIN_TOOL_TIER[tool]!);
+    if (tool === "garage") {
+      const problem = garageProblem(tx, ty);
+      if (problem) {
+        showRefusal(tx, ty, problem);
+        return;
+      }
+      const price = fleet.nextGarageCost;
+      showPlacement(tx, ty, `🏠 Garasje her · ${price === 0 ? "gratis" : kr(price)}`, "Sett opp garasje", () => placeGarage(tx, ty));
+      return;
+    }
+    const cabinTier = CABIN_TOOL_TIER[tool];
+    if (cabinTier !== undefined) {
+      const existing = cabinNear(tx, ty, 1);
+      const spec = CABIN_TIERS[cabinTier];
+      const problem = existing ? null : cabinProblem(tx, ty) ?? (spec.price > budget ? `Ikke råd: ${kr(spec.price)}` : null);
+      if (existing) {
+        openCabin(existing.x, existing.y);
+      } else if (problem) {
+        showRefusal(tx, ty, problem);
+      } else {
+        showPlacement(tx, ty, `${TOOL_ICONS[tool]} ${spec.name} her · ${kr(spec.price)}`, `Bygg ${spec.name.toLowerCase()}`, () => cabinTool(tx, ty, cabinTier));
+      }
       return;
     }
     const cabin = cabinNear(tx, ty, 1);
@@ -1708,6 +1728,7 @@ async function main() {
   type PlanTile = { x: number; y: number; kind: "track" | "new" | "crossing" | "blocked"; price: number; reason?: string };
   let plan: PlanTile[] | null = null;
   const planPanel = document.getElementById("build-plan")!;
+  const setupPanel = document.getElementById("setup")!;
 
   /** What a straight line of track from a tile to another would meet, stopping at the first tile it cannot cross. */
   const planRoute = (from: [number, number], tx: number, ty: number): PlanTile[] => {
@@ -1802,10 +1823,27 @@ async function main() {
     }
   };
 
+  /** A building a finger has picked a spot for, waiting for the player to confirm it. */
+  let placement: (() => void) | null = null;
+
+  /** Mark a tile and ask before putting a building on it, so a stray touch never spends money. */
+  const showPlacement = (x: number, y: number, text: string, label: string, place: () => void) => {
+    clearPlan();
+    placement = place;
+    planLayer.rect(x * PX - PX, y * PX - PX, PX * 3, PX * 3).fill({ color: PLAN_COLOURS.new, alpha: 0.45 }).stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
+    planPanel.innerHTML = `<div class="text"><strong>${text}</strong></div>
+      <div class="actions"><button data-plan="place">${label}</button><button data-plan="cancel">Avbryt</button></div>`;
+    planPanel.hidden = false;
+    setupPanel.hidden = true;
+    toast.hidden = true;
+  };
+
   const clearPlan = () => {
     plan = null;
+    placement = null;
     planLayer.clear();
     planPanel.hidden = true;
+    setupPanel.hidden = fleet.garages.length > 0;
   };
 
   /** Lay tiles in order; a crossing asks first, and the rest follows once it is chosen. */
@@ -1842,6 +1880,10 @@ async function main() {
       clearPlan();
       strokeCrossing = null;
       layPath(tiles, []);
+    } else if (action === "place" && placement) {
+      const place = placement;
+      clearPlan();
+      place();
     } else if (action === "cancel") {
       clearPlan();
     }
@@ -1959,7 +2001,7 @@ async function main() {
     if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
       return;
     }
-    const fingerTool = e.pointerType === "touch" && (tool === "build" || tool === "remove" || CABIN_TOOL_TIER[tool] !== undefined);
+    const fingerTool = e.pointerType === "touch" && (tool === "build" || tool === "remove" || tool === "garage" || CABIN_TOOL_TIER[tool] !== undefined);
     if (e.button === 0 && fingerTool) {
       // A finger may be about to tap, drag or pinch: wait and see before laying anything.
       pendingTouch = { sx: e.offsetX, sy: e.offsetY, tile: tileAt(e.offsetX, e.offsetY) };
