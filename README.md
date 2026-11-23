@@ -189,8 +189,10 @@ number of tiles, the price and each crossing named, and is only laid on "Lag lø
 ("Avbryt" drops it); crossing dialogs come up on the way and building carries on after each; tapping existing track moves the flag there to branch off, and ↶ (or
 Ctrl/Cmd+Z) takes back the last stroke and its cost. A finger that moves before lifting
 pans the map instead, in every tool, so track is only ever laid through a confirmed plan; a
-tap with 👀 only shows the tile without moving the flag. On compact screens the four tools sit behind one button showing the
-current tool (⛷▴); tapping it opens a menu with all four by name. Two fingers pan and pinch-zoom in any
+tap with 👀 only shows the tile without moving the flag. On compact screens the tools sit behind one button showing the current
+tool (⛷▴); tapping it opens a menu with them by name. On a touch-only device 👀 is left out
+and building is the resting tool, since one finger already pans and a tap shows the tile's
+info along with the plan. Two fingers pan and pinch-zoom in any
 tool. The zoom is free while pinching and settles on the nearest zoom step when the fingers
 lift. If the first finger has laid a tile or two before the second lands, that stroke is
 undone and refunded.

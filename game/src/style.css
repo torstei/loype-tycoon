@@ -273,3 +273,4 @@ html.compact #tools #tool-menu-button { background: #1f5fd1; color: #fff; border
 #build-plan button { flex: 1; font: inherit; font-weight: 700; padding: 10px; border-radius: 10px; border: 2px solid #2fa84f;
   background: #fff; color: #1f6f36; cursor: pointer; }
 #build-plan button[data-plan="build"] { background: #2fa84f; color: #fff; }
+html.touch #tool-menu [data-tool="look"] { display: none; }
