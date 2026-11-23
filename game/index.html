@@ -2,7 +2,7 @@
 <html lang="nb">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Løype Tycoon</title>
     <script>
       // The game's own code was not found (a page cached from before the last deploy): reload once.
@@ -38,6 +38,7 @@
         <button data-tool="build" title="2">⛷ <span class="label">Bygg løype</span></button>
         <button data-tool="remove" title="3">✖ <span class="label">Fjern</span></button>
         <button data-tool="garage" title="4">🏠 <span class="label">Garasje</span></button>
+        <button class="compact-only" id="undo" title="Angre siste løype (Ctrl+Z)">↶</button>
         <button class="compact-only" data-zoom="1" title="Zoom inn">＋</button>
         <button class="compact-only" data-zoom="-1" title="Zoom ut">－</button>
         <span class="speed">
