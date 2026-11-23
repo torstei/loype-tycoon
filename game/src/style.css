@@ -257,3 +257,19 @@ html.compact #crossing .card, html.compact #game-menu, html.compact #kiosk { max
   box-sizing: border-box; width: calc(100vw - 16px); }
 html.compact #setup, html.compact #report, html.compact #paper, html.compact #forecast.open { box-sizing: border-box; }
 html.compact #setup { width: calc(100vw - 16px); }
+html.compact #tools [data-tool] { display: none; }
+html.compact #tools #tool-menu-button { background: #1f5fd1; color: #fff; border-color: #1f5fd1; font-size: 16px; }
+#tool-menu { position: fixed; left: 8px; bottom: calc(var(--bar) + 6px); z-index: 9; display: flex; flex-direction: column; gap: 4px;
+  padding: 6px; background: #fff; border: 2px solid #1f5fd1; border-radius: 12px; box-shadow: 0 8px 24px rgba(20, 35, 70, 0.35); }
+#tool-menu[hidden] { display: none; }
+#tool-menu button { font: inherit; font-size: 16px; text-align: left; padding: 10px 14px; border: 1px solid #c8d4e2; border-radius: 8px;
+  background: #fff; cursor: pointer; min-width: 190px; }
+#tool-menu button.active { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
+#build-plan { position: fixed; left: 8px; right: 8px; bottom: calc(var(--bar) + var(--fleet, 0px) + 8px); z-index: 8;
+  padding: 10px 12px; background: #fffdf6; border: 3px solid #2fa84f; border-radius: 12px; font-size: 14px; line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(20, 35, 70, 0.35); }
+#build-plan[hidden] { display: none; }
+#build-plan .actions { display: flex; gap: 8px; margin-top: 8px; }
+#build-plan button { flex: 1; font: inherit; font-weight: 700; padding: 10px; border-radius: 10px; border: 2px solid #2fa84f;
+  background: #fff; color: #1f6f36; cursor: pointer; }
+#build-plan button[data-plan="build"] { background: #2fa84f; color: #fff; }
