@@ -174,10 +174,9 @@ on a bridge or in a tunnel.
 
 ## Phones and tablets
 
-The game needs a mouse and a keyboard. On a touch-only device (coarse pointer and no fine
-one) it says so before loading the map, offers to share or copy the link to open on a
-computer, and lets anyone carry on anyway, warned that it will be painful, for the rest of the
-browser session.
+The game was made for mouse and keyboard first but plays on a touchscreen too. The first time
+it opens on a touch-only device (coarse pointer and no fine one) a short box explains tapping
+and the build plan, one finger to pan and two to zoom, and the tool button and undo.
 
 On a narrow window or a touch-only device the layout turns compact: a one-line status bar on
 top, the tools as a single scrolling row of icons at the bottom (with zoom and forecast
