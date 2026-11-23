@@ -142,7 +142,10 @@ format or with another grid size are refused. Skiers out on a trip, moose and th
 not saved.
 
 Append `?debug` to the URL to expose the game state as `window.loype` for poking at
-from the browser console or a test script.
+from the browser console or a test script. `loype.fastForward(hours)` runs the game ahead as fast as it computes (a
+season takes a few seconds), with nothing drawn on the way, and `loype.history()` gives one
+row per finished day (skiers, satisfaction, donations, memberships, waffles, diesel,
+electricity, cash, reputation) for balancing runs.
 
 ## Generating a map
 

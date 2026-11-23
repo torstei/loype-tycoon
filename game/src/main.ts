@@ -86,6 +86,8 @@ const TOUCH_SLOP = 14;
 const TAP_REACH = 30;
 /** A stroke this short when a second finger lands was the start of a pinch, not a track. */
 const SHORT_STROKE = 3;
+/** Game hours per step when fast-forwarding: small enough that skiers and snowcats move as in play. */
+const FAST_FORWARD_STEP = 0.1;
 /** How far from the network a drag may start and still be linked up automatically, in tiles. */
 const CONNECT_REACH = 3;
 const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
@@ -190,7 +192,9 @@ async function main() {
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks, publishEdition: () => publishEdition() } });
+    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks,
+      fastForward: (hours: number, step?: number) => fastForward(hours, step), history: () => history,
+      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier) }, publishEdition: () => publishEdition() } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -204,20 +208,72 @@ async function main() {
   let yesterdayHyped = false;
   let sinceHud = 0;
   let forecastDay = -1;
+  /** Everything that happens in the world over some game hours, without drawing anything. */
+  const simulate = (hours: number) => {
+    const { snow, rain } = weather.advance(clock.hours - hours, hours);
+    snowSinceReport += snow;
+    rainSinceReport += rain;
+    snowToday += snow;
+    rainToday += rain;
+    tracks.applyWeather(hours, weather, snow, rain);
+    fleet.update(hours, clock.hours, clock.hourOfDay, tracks, weather, ledger);
+    crowd.update(hours, clock, weather, tracks);
+    skijorer.update(hours, clock, tracks);
+    whimsy.simulate(hours, tracks, clock.hours, (x, y) => crowd.near(x, y, 5));
+  };
+
+  /** The day's fixed points: the morning report, Thursday's paper, and closing the books at midnight. */
+  const calendar = () => {
+    if (clock.day > lastReportDay && clock.hourOfDay >= 7 && clock.hourOfDay < 12 && tracks.size > 0) {
+      lastReportDay = clock.day;
+      publishReport();
+    }
+    if (weekday(clock.day) === PUBLISH_WEEKDAY && clock.hourOfDay >= PUBLISH_HOUR && clock.day > paper.lastDay && fleet.garages.length > 0) {
+      publishEdition();
+    }
+    if (clock.day !== forecastDay) {
+      if (forecastDay >= 0) {
+        closeDay(forecastDay);
+        if (!fastForwarding) {
+          autosave();
+        }
+      }
+      forecastDay = clock.day;
+      refreshForecast();
+    }
+  };
+
+  /**
+   * Run the game ahead as fast as it computes, for balancing and tests: the world in small steps,
+   * the calendar after each, nothing drawn until the end.
+   */
+  let fastForwarding = false;
+  const fastForward = (hours: number, step = FAST_FORWARD_STEP) => {
+    fastForwarding = true;
+    refreshTrailheads();
+    const wasPaused = clock.paused;
+    clock.paused = true;
+    timeStarted = true;
+    let left = hours;
+    while (left > 0 && !clock.seasonOver) {
+      const h = Math.min(step, left);
+      clock.hours += h;
+      simulate(h);
+      calendar();
+      left -= h;
+    }
+    clock.paused = wasPaused;
+    fastForwarding = false;
+    redrawTracks();
+    refreshHud();
+    return history;
+  };
+
   app.ticker.add((ticker) => {
     const dt = Math.min(0.1, ticker.deltaMS / 1000);
     const hours = clock.tick(dt);
     if (hours > 0) {
-      const { snow, rain } = weather.advance(clock.hours - hours, hours);
-      snowSinceReport += snow;
-      rainSinceReport += rain;
-      snowToday += snow;
-      rainToday += rain;
-      tracks.applyWeather(hours, weather, snow, rain);
-      fleet.update(hours, clock.hours, clock.hourOfDay, tracks, weather, ledger);
-      crowd.update(hours, clock, weather, tracks);
-      skijorer.update(hours, clock, tracks);
-      whimsy.simulate(hours, tracks, clock.hours, (x, y) => crowd.near(x, y, 5));
+      simulate(hours);
       sinceRedraw += hours;
       if (sinceRedraw >= 0.25) {
         sinceRedraw = 0;
@@ -234,21 +290,7 @@ async function main() {
       sinceHud = 0;
       refreshHud();
     }
-    if (clock.day > lastReportDay && clock.hourOfDay >= 7 && clock.hourOfDay < 12 && tracks.size > 0) {
-      lastReportDay = clock.day;
-      publishReport();
-    }
-    if (weekday(clock.day) === PUBLISH_WEEKDAY && clock.hourOfDay >= PUBLISH_HOUR && clock.day > paper.lastDay && fleet.garages.length > 0) {
-      publishEdition();
-    }
-    if (clock.day !== forecastDay) {
-      if (forecastDay >= 0) {
-        closeDay(forecastDay);
-        autosave();
-      }
-      forecastDay = clock.day;
-      refreshForecast();
-    }
+    calendar();
     const darkness = 1 - clock.daylight();
     night.clear().rect(0, 0, app.screen.width, app.screen.height).fill({ color: 0x0b1a3a, alpha: darkness * 0.5 });
     lightsWorld.position.copyFrom(world.position);
@@ -524,6 +566,9 @@ async function main() {
     return bill;
   };
 
+  /** One row per finished day, for balancing runs. */
+  const history: { day: number; skiers: number; happy: number | null; donations: number; members: number; waffles: number; waffleIncome: number; diesel: number; power: number; budget: number; reputation: number; tiles: number }[] = [];
+
   const closeDay = (day: number) => {
     yesterdayHyped = crowd.hype;
     incidentsYesterday = incidentsToday;
@@ -535,6 +580,20 @@ async function main() {
     const diesel = dieselToday;
     dieselToday = 0;
     const power = closeKiosks();
+    history.push({
+      day,
+      skiers: stats.skiers,
+      happy: stats.finished > 0 ? stats.satisfaction / stats.finished : null,
+      donations: stats.donations,
+      members: stats.members,
+      waffles: stats.waffles,
+      waffleIncome: stats.waffleIncome,
+      diesel,
+      power,
+      budget,
+      reputation: crowd.reputation,
+      tiles: tracks.size,
+    });
     if (stats.skiers === 0 && diesel === 0) {
       return;
     }
@@ -658,7 +717,7 @@ async function main() {
     crowd.press = 1 + edition.tone * PRESS_DEMAND;
     paper.pressUntil = clock.day + PRESS_DAYS;
     const effect = edition.tone > 0 ? "God omtale: flere tar turen hit i helgen." : edition.tone < 0 ? "Dårlig omtale: noen blir hjemme i helgen." : "";
-    if (autoOpen("paper")) {
+    if (autoOpen("paper") && !fastForwarding) {
       showPaper(true);
       if (effect) {
         showToast(`🗞 ${effect}`);
@@ -795,7 +854,7 @@ async function main() {
     rainSinceReport = 0;
     reports.push({ report, rosy: false });
     reportIndex = reports.length - 1;
-    if (reports.length === 1 || autoOpen("report")) {
+    if (!fastForwarding && (reports.length === 1 || autoOpen("report"))) {
       showReport(true);
     } else if (reportPanel.hidden) {
       reportButton.classList.add("unread");

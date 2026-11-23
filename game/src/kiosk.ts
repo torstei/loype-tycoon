@@ -43,7 +43,7 @@ export const KIOSK_TIERS: KioskTier[] = [
   {
     name: "Vaffelbu med gassbrenner",
     short: "Vaffelbu",
-    price: 12_000,
+    price: 20_000,
     pitch: "Et lite skur med luke, to vaffeljern og en gassbrenner. Åpent hver dag så lenge det er lyst.",
     capacity: 120,
     salePrice: 30,
@@ -58,7 +58,7 @@ export const KIOSK_TIERS: KioskTier[] = [
   {
     name: "Kiosk med kaffetrakter, bålpanne og benker",
     short: "Kiosk",
-    price: 45_000,
+    price: 80_000,
     pitch: "Brunost, rømme, kaffe fra trakteren og bål i panna. Folk blir sittende, og de kommer igjen.",
     capacity: 300,
     salePrice: 35,
