@@ -1,9 +1,9 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { Camera, OVERVIEW_BELOW } from "./camera";
-import { dayLabel, GameClock, SPEEDS, weekday } from "./clock";
+import { dayLabel, GameClock, holiday, isWeekend, SPEEDS, weekday } from "./clock";
 import { Fleet, GARAGE_REACH } from "./groomer";
 import { areas, Report, writeReport } from "./report";
-import { EXPERTS, Kiosk, KIOSK_TIERS } from "./kiosk";
+import { CABIN_REACH, CABIN_TIERS, EXPERTS, Kiosk, KIOSK_TIERS, OutletKind } from "./kiosk";
 import { showTouchTips, touchOnly } from "./mobile";
 import { showStartupError, watchForStaleBuild } from "./startup";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
@@ -30,14 +30,14 @@ import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
 import { landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
-import { Flag, FLAG_NAMES, TERRAIN_NAMES } from "./terrain";
+import { Flag, FLAG_NAMES, Terrain, TERRAIN_NAMES } from "./terrain";
 import { askCrossing } from "./crossing";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
 import { Precipitation, Whimsy } from "./whimsy";
 import "./style.css";
 
-type Tool = "look" | "build" | "remove" | "garage";
+type Tool = "look" | "build" | "remove" | "garage" | "cabin";
 
 /** Hours since grooming, upper bound of each band, and its colour on the grooming map. */
 const GROOM_AGE: [number, number, string][] = [
@@ -73,7 +73,7 @@ const PAN_KEYS: Record<string, [number, number]> = {
 };
 
 const START_BUDGET = 150_000;
-const TOOL_ICONS: Record<Tool, string> = { look: "👀", build: "⛷", remove: "✖", garage: "🏠" };
+const TOOL_ICONS: Record<Tool, string> = { look: "👀", build: "⛷", remove: "✖", garage: "🏠", cabin: "🛖" };
 /** Below this window width (or on a touch-only device) the tools move to a bar at the bottom. */
 const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
@@ -194,7 +194,7 @@ async function main() {
   if (new URLSearchParams(location.search).has("debug")) {
     Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks,
       fastForward: (hours: number, step?: number) => fastForward(hours, step), history: () => history,
-      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier) }, publishEdition: () => publishEdition() } });
+      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition() } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -251,6 +251,7 @@ async function main() {
   const fastForward = (hours: number, step = FAST_FORWARD_STEP) => {
     fastForwarding = true;
     refreshTrailheads();
+    claimCabins();
     const wasPaused = clock.paused;
     clock.paused = true;
     timeStarted = true;
@@ -307,7 +308,7 @@ async function main() {
     skijorer.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight(), crowd.lights);
     for (const { node, kind } of signs) {
       node.scale.set(s < 1 ? 1 / s : 1);
-      node.visible = s >= OVERVIEW_BELOW || kind !== "parking";
+      node.visible = s >= OVERVIEW_BELOW || (kind !== "parking" && kind !== "cabin");
     }
     const tl = world.toLocal({ x: 0, y: 0 });
     const br = world.toLocal({ x: app.screen.width, y: app.screen.height });
@@ -416,12 +417,20 @@ async function main() {
         const k = kioskAt(g.garage.x, g.garage.y);
         return `<div class="row"><span class="name">🚜 ${g.name}</span> ${g.status}
           <button class="kiosk" data-kiosk="${i}" title="Vaffelsalg ved garasjen">🧇 ${k ? `${k.spec.short}${k.broken ? " (i ustand)" : ""}` : "Vaffelsalg?"}</button></div>`;
-      }).join("")}`;
+      }).join("")}
+      ${kiosks.filter((k) => k.kind === "cabin").map((k) => `<div class="row"><span class="name">🛖 ${k.title}</span> ${k.spec.short}${k.spec.rooms ? ` · 🛏 ${k.guestsLastNight}` : ""}
+          <button class="kiosk" data-cabin="${k.x},${k.y}">Åpne</button></div>`).join("")}`;
   };
   fleetPanel.addEventListener("pointerdown", (e) => {
     const kioskButton = (e.target as HTMLElement).closest<HTMLElement>("[data-kiosk]");
     if (kioskButton) {
       openKiosk(Number(kioskButton.dataset.kiosk));
+      return;
+    }
+    const cabinButton = (e.target as HTMLElement).closest<HTMLElement>("[data-cabin]");
+    if (cabinButton) {
+      const [cx, cy] = cabinButton.dataset.cabin!.split(",").map(Number);
+      openCabin(cx, cy);
       return;
     }
     if ((e.target as HTMLElement).id === "schedule") {
@@ -460,74 +469,109 @@ async function main() {
   });
 
   const kiosks = crowd.kiosks;
-  const kioskAt = (x: number, y: number) => kiosks.find((k) => k.x === x && k.y === y);
+  const kioskAt = (x: number, y: number) => kiosks.find((k) => k.kind === "stand" && k.x === x && k.y === y);
+  /** A cabin on or right next to a tile. */
+  const cabinNear = (x: number, y: number, r = 1) => kiosks.find((k) => k.kind === "cabin" && Math.max(Math.abs(k.x - x), Math.abs(k.y - y)) <= r);
   const kioskPanel = document.getElementById("kiosk")!;
-  let kioskGarage = -1;
+  /** What the waffle dialog is about: the stand at a garage, or a cabin (or a site for one). */
+  let outletTarget: { kind: "garage"; index: number } | { kind: "cabin"; x: number; y: number } | null = null;
   let kioskBoughtToday: string | null = null;
   let kioskUpgradedToday = false;
   let kioskBrokenToday = false;
   let expertsHiredToday = false;
+  let cabinClaimedToday: string | null = null;
+  let cabinBuiltToday: string | null = null;
 
-  const placeKiosk = (x: number, y: number, tier: number): Kiosk => {
-    const existing = kioskAt(x, y);
+  const placeOutlet = (x: number, y: number, tier: number, kind: OutletKind = "stand", name: string | null = null): Kiosk => {
+    const existing = kind === "stand" ? kioskAt(x, y) : cabinNear(x, y, 0);
     if (existing) {
       existing.upgrade(tier);
       return existing;
     }
-    const k = new Kiosk(x, y, tier);
+    const k = new Kiosk(x, y, tier, kind, name);
     kiosks.push(k);
     kioskLayer.addChild(k.sprite);
     return k;
   };
+  const placeKiosk = (x: number, y: number, tier: number) => placeOutlet(x, y, tier);
 
   const openKiosk = (garageIndex: number) => {
-    kioskGarage = garageIndex;
+    outletTarget = { kind: "garage", index: garageIndex };
+    kioskPanel.hidden = false;
+    renderKiosk();
+  };
+  const openCabin = (x: number, y: number) => {
+    outletTarget = { kind: "cabin", x, y };
     kioskPanel.hidden = false;
     renderKiosk();
   };
 
+  /** Where the dialog's outlet is, what stands there now, and which levels it offers. */
+  const resolveTarget = () => {
+    if (!outletTarget) {
+      return null;
+    }
+    if (outletTarget.kind === "garage") {
+      const groomer = fleet.groomers[outletTarget.index];
+      if (!groomer) {
+        return null;
+      }
+      const { x, y } = groomer.garage;
+      return { x, y, kind: "stand" as const, current: kioskAt(x, y), tiers: KIOSK_TIERS.map((t, i) => [t, i] as const), title: `🧇 Vaffelsalg ved garasjen til ${groomer.name}` };
+    }
+    const { x, y } = outletTarget;
+    const current = cabinNear(x, y, 0);
+    const offered = current?.tier === 0 ? [[CABIN_TIERS[0], 0] as const] : CABIN_TIERS.map((t, i) => [t, i] as const).filter(([t]) => t.price > 0);
+    return { x, y, kind: "cabin" as const, current, tiers: offered, title: current ? `🛖 ${current.title}` : "🛖 Ny hytte her" };
+  };
+
   const renderKiosk = () => {
-    const groomer = fleet.groomers[kioskGarage];
-    if (!groomer) {
+    const target = resolveTarget();
+    if (!target) {
       kioskPanel.hidden = true;
       return;
     }
-    const current = kioskAt(groomer.garage.x, groomer.garage.y);
+    const { current, kind } = target;
     const paid = current ? current.spec.price : 0;
     const status = !current
-      ? "Ingen vaffelsalg her ennå. Vafler gir inntekt, og folk tar gjerne en tur dit det lukter vaffel."
+      ? kind === "cabin"
+        ? "Bygg en hytte her ved løypa. Hytter blir turmål: skiløpere som går innom, er mer fornøyde, og flere kommer."
+        : "Ingen vaffelsalg her ennå. Vafler gir inntekt, og folk tar gjerne en tur dit det lukter vaffel."
       : current.broken
         ? `${current.spec.name} er i ustand i dag. Teknikeren kommer i morgen.`
-        : `I dag: ${current.soldToday} av ${current.capacityOn(clock.day)} vafler solgt · ${current.isOpen(clock.day, clock.hourOfDay) ? "åpent nå" : `åpent ${current.spec.open[0]}–${current.spec.open[1]}${current.spec.weekendsOnly ? " i helgene" : ""}`}${current.expertsOn(clock.day) ? " · 🎯 skytterlaget steiker" : ""}`;
-    const rows = KIOSK_TIERS.map((t, i) => {
+        : `I dag: ${current.soldToday} av ${current.capacityOn(clock.day)} vafler solgt · ${current.isOpen(clock.day, clock.hourOfDay) ? "åpent nå" : `åpent ${current.spec.open[0]}–${current.spec.open[1]}${current.spec.weekendsOnly ? " i helgene" : ""}`}${current.expertsOn(clock.day) ? " · 🎯 skytterlaget steiker" : ""}${current.spec.rooms ? ` · 🛏 ${current.guestsLastNight} gjester i natt` : ""}`;
+    const rows = target.tiers.map(([t, i]) => {
       const owned = current !== undefined && i <= current.tier;
       const cost = t.price - paid;
       const extras = [
         `${t.capacity.toLocaleString("nb-NO")} vafler/dag`,
         `${t.salePrice} kr stykket`,
         `åpent ${t.open[0]}–${t.open[1]}${t.weekendsOnly ? ", bare i helgene" : ""}`,
-        t.dailyCost ? `strøm ${kr(t.dailyCost)}/dag` : "",
+        t.rooms ? `${t.rooms} rom à ${kr(t.roomPrice ?? 0)}` : "",
+        t.dailyCost ? `${kind === "cabin" ? "lønn" : "strøm"} ${kr(t.dailyCost)}/dag` : "",
       ].filter(Boolean).join(" · ");
       const action = current?.tier === i
-        ? `<span class="owned">✓ Dette har dere</span>`
+        ? `<span class="owned">✓ ${kind === "cabin" && i === 0 ? "Koblet til løypa" : "Dette har dere"}</span>`
         : owned
           ? `<span class="owned">✓</span>`
-          : `<button data-buy="${i}" ${cost > budget ? "disabled" : ""}>${current ? "Oppgrader" : "Kjøp"} ${kr(cost)}</button>`;
+          : `<button data-buy="${i}" ${cost > budget ? "disabled" : ""}>${current ? "Oppgrader" : kind === "cabin" ? "Bygg" : "Kjøp"} ${kr(cost)}</button>`;
       return `<tr class="${current?.tier === i ? "current" : ""}"><td><strong>${t.name}</strong><br><small>${t.pitch}</small><br><small class="facts">${extras}</small></td><td>${action}</td></tr>`;
     }).join("");
     kioskPanel.innerHTML = `
-      <div class="head"><strong>🧇 Vaffelsalg ved garasjen til ${groomer.name}</strong><button data-k="close">✕</button></div>
+      <div class="head"><strong>${target.title}</strong><button data-k="close">✕</button></div>
       <p class="status">${status}</p>
       <table>${rows}</table>
-      <p class="note">Oppgradering koster mellomlegget: det dere har betalt, trekkes fra.</p>
+      ${current?.tier === 0 && kind === "cabin" ? "" : `<p class="note">Oppgradering koster mellomlegget: det dere har betalt, trekkes fra.</p>`}
       <div class="experts">
         <div><strong>🎯 ${EXPERTS.name}</strong><br><small>${EXPERTS.pitch}</small><br>
           <small class="facts">I helgene: ${Math.round((EXPERTS.capacity - 1) * 100)} % flere vafler · flere stopper · +${EXPERTS.extraPrice} kr stykket</small></div>
         <div>${current?.experts
           ? `<span class="owned">✓ Avtale inngått</span>`
-          : !current || current.tier < EXPERTS.minTier
-            ? `<small>Krever minst ${KIOSK_TIERS[EXPERTS.minTier].short.toLowerCase()}</small>`
-            : `<button data-experts="hire" ${EXPERTS.price > budget ? "disabled" : ""}>Inngå avtale ${kr(EXPERTS.price)}</button>`}</div>
+          : !current
+            ? `<small>${kind === "cabin" ? "Bygg hytta først" : `Krever minst ${KIOSK_TIERS[EXPERTS.minTier].short.toLowerCase()}`}</small>`
+            : !current.canHireExperts()
+              ? `<small>Krever minst ${KIOSK_TIERS[EXPERTS.minTier].short.toLowerCase()}</small>`
+              : `<button data-experts="hire" ${EXPERTS.price > budget ? "disabled" : ""}>Inngå avtale ${kr(EXPERTS.price)}</button>`}</div>
       </div>`;
   };
 
@@ -540,10 +584,13 @@ async function main() {
       kioskPanel.hidden = true;
       return;
     }
+    const target = resolveTarget();
+    if (!target) {
+      return;
+    }
     if (button.dataset.experts === "hire") {
-      const groomer = fleet.groomers[kioskGarage];
-      const k = groomer && kioskAt(groomer.garage.x, groomer.garage.y);
-      if (k && !k.experts && k.tier >= EXPERTS.minTier && EXPERTS.price <= budget) {
+      const k = target.current;
+      if (k && !k.experts && k.canHireExperts() && EXPERTS.price <= budget) {
         budget -= EXPERTS.price;
         k.hireExperts();
         expertsHiredToday = true;
@@ -554,43 +601,141 @@ async function main() {
       return;
     }
     const tier = Number(button.dataset.buy);
-    const groomer = fleet.groomers[kioskGarage];
-    if (!groomer || !Number.isFinite(tier)) {
+    if (!Number.isFinite(tier)) {
       return;
     }
-    const current = kioskAt(groomer.garage.x, groomer.garage.y);
-    const cost = KIOSK_TIERS[tier].price - (current ? current.spec.price : 0);
+    const spec = (target.kind === "cabin" ? CABIN_TIERS : KIOSK_TIERS)[tier];
+    const cost = spec.price - (target.current ? target.current.spec.price : 0);
     if (cost > budget) {
       return;
     }
     budget -= cost;
-    placeKiosk(groomer.garage.x, groomer.garage.y, tier);
-    kioskBoughtToday = KIOSK_TIERS[tier].name;
-    kioskUpgradedToday = current !== undefined;
-    showToast(tier === KIOSK_TIERS.length - 1
-      ? "🧇 <strong>Vaffel-O-Matic 3000</strong> er levert! Den surrer, blinker og lukter brunost. Naboene har spørsmål."
-      : `🧇 <strong>${KIOSK_TIERS[tier].name}</strong> er klar ved garasjen. Røren står klar.`);
+    if (target.kind === "cabin") {
+      placeOutlet(target.x, target.y, tier, "cabin", target.current?.name ?? null);
+      const where = nearestPlace(target.x, target.y);
+      cabinBuiltToday = `${spec.name}${where ? ` ved ${where}` : ""}`;
+      showToast(`🛖 <strong>${spec.name}</strong> står klar${where ? ` ved ${where}` : ""}. ${spec.rooms ? "Sengene er redd opp og komfyren er varm." : "Vaffeljernet er plugget i, og de frivillige har satt opp vaktliste."}`);
+    } else {
+      placeOutlet(target.x, target.y, tier);
+      kioskBoughtToday = spec.name;
+      kioskUpgradedToday = target.current !== undefined;
+      showToast(tier === KIOSK_TIERS.length - 1
+        ? "🧇 <strong>Vaffel-O-Matic 3000</strong> er levert! Den surrer, blinker og lukter brunost. Naboene har spørsmål."
+        : `🧇 <strong>${spec.name}</strong> er klar ved garasjen. Røren står klar.`);
+    }
     renderKiosk();
     refreshHud();
   });
 
+  /** The named place nearest a tile, for saying where something is. */
+  const nearestPlace = (x: number, y: number): string | null => {
+    let best: string | null = null;
+    let bestD = Infinity;
+    for (const p of map.pois) {
+      if (p.name && (p.kind === "place" || p.kind === "peak" || p.kind === "station")) {
+        const d = Math.hypot(p.x - x, p.y - y);
+        if (d < bestD) {
+          bestD = d;
+          best = p.name;
+        }
+      }
+    }
+    return best;
+  };
+
+  /** Why a cabin cannot go on a tile, or null if it can. */
+  const cabinProblem = (x: number, y: number): string | null => {
+    if (!map.inside(x, y)) {
+      return "Utenfor kartet";
+    }
+    if (tracks.has(x, y)) {
+      return "Hytta kan ikke stå midt i løypa — velg en plass ved siden av";
+    }
+    if (map.terrainAt(x, y) === Terrain.Water || map.has(x, y, Flag.Road) || map.has(x, y, Flag.Rail)) {
+      return "Kan ikke bygge hytte her";
+    }
+    if (tracks.cost(x, y) === null) {
+      return tracks.blockReason(x, y) ?? "Kan ikke bygge hytte her";
+    }
+    let nearTrack = false;
+    for (let dy = -CABIN_REACH; dy <= CABIN_REACH && !nearTrack; dy++) {
+      for (let dx = -CABIN_REACH; dx <= CABIN_REACH && !nearTrack; dx++) {
+        nearTrack = tracks.has(x + dx, y + dy);
+      }
+    }
+    if (!nearTrack) {
+      return "Hytta må ligge ved løypa";
+    }
+    if (cabinNear(x, y, 4) || fleet.garages.some((g) => Math.abs(g.x - x) < 4 && Math.abs(g.y - y) < 4)) {
+      return "For nær en annen hytte eller garasje";
+    }
+    return null;
+  };
+
+  /** The cabin tool on a tile: open the cabin that is there, or offer to build one. */
+  const cabinTool = (x: number, y: number) => {
+    const existing = cabinNear(x, y, 1);
+    if (existing) {
+      openCabin(existing.x, existing.y);
+      return;
+    }
+    const problem = cabinProblem(x, y);
+    if (problem) {
+      showRefusal(x, y, problem);
+      return;
+    }
+    openCabin(x, y);
+  };
+
+  /** Existing cabins with someone serving: the club claims them by bringing the track within reach. */
+  const claimCabins = () => {
+    for (const p of map.pois) {
+      if (p.kind !== "cafe" || !p.name || cabinNear(p.x, p.y, 0)) {
+        continue;
+      }
+      let reached = false;
+      for (let dy = -CABIN_REACH; dy <= CABIN_REACH && !reached; dy++) {
+        for (let dx = -CABIN_REACH; dx <= CABIN_REACH && !reached; dx++) {
+          reached = tracks.has(p.x + dx, p.y + dy);
+        }
+      }
+      if (reached) {
+        placeOutlet(p.x, p.y, 0, "cabin", p.name);
+        cabinClaimedToday = p.name;
+        if (!fastForwarding) {
+          showToast(`🛖 <strong>${p.name} er koblet til løypenettet!</strong> Skiløperne har fått et turmål, og stua selger vafler for løypelaget.`);
+        }
+      }
+    }
+  };
+
   /** Waffle stands at day's end: the electricity bill, and whether the machinery holds up for tomorrow. */
-  const closeKiosks = () => {
+  const closeKiosks = (day: number) => {
     let bill = 0;
+    let guests = 0;
+    let rooms = 0;
     for (const k of kiosks) {
       bill += k.spec.dailyCost;
+      if (k.spec.rooms) {
+        // Guests follow the club's name; weekends and holidays fill the rooms faster.
+        const busy = (isWeekend(day) || isWeekend(day + 1) ? 1.3 : 0.8) * Math.sqrt(holiday(day).factor);
+        const share = Math.min(1, (0.2 + 0.8 * crowd.reputation) * busy * (0.8 + 0.4 * Math.random()));
+        k.guestsLastNight = Math.round(k.spec.rooms * share);
+        guests += k.guestsLastNight;
+        rooms += k.guestsLastNight * (k.spec.roomPrice ?? 0);
+      }
       k.broken = Math.random() < k.spec.breakdown;
       if (k.broken) {
         kioskBrokenToday = true;
         showToast(`🧇 ${k.spec.name} har satt seg fast. Røren har stivnet i dysene. Stengt i dag, teknikeren er bestilt.`);
       }
     }
-    budget -= bill;
-    return bill;
+    budget += rooms - bill;
+    return { bill, guests, rooms };
   };
 
   /** One row per finished day, for balancing runs. */
-  const history: { day: number; skiers: number; happy: number | null; donations: number; members: number; waffles: number; waffleIncome: number; diesel: number; power: number; budget: number; reputation: number; tiles: number }[] = [];
+  const history: { day: number; skiers: number; happy: number | null; donations: number; members: number; waffles: number; waffleIncome: number; diesel: number; power: number; guests: number; rooms: number; budget: number; reputation: number; tiles: number }[] = [];
 
   const closeDay = (day: number) => {
     yesterdayHyped = crowd.hype;
@@ -598,11 +743,11 @@ async function main() {
     incidentsToday = [];
     const stats = crowd.endDay();
     yesterday = stats;
-    logNews(day, stats);
+    const { bill: power, guests, rooms } = closeKiosks(day);
+    logNews(day, stats, guests);
     const happy = stats.finished > 0 ? Math.round((stats.satisfaction / stats.finished) * 100) : 0;
     const diesel = dieselToday;
     dieselToday = 0;
-    const power = closeKiosks();
     history.push({
       day,
       skiers: stats.skiers,
@@ -613,6 +758,8 @@ async function main() {
       waffleIncome: stats.waffleIncome,
       diesel,
       power,
+      guests,
+      rooms,
       budget,
       reputation: crowd.reputation,
       tiles: tracks.size,
@@ -625,7 +772,8 @@ async function main() {
       ${stats.members > 0 ? `· ${stats.members} nye medlemmer <span class="plus">+${kr(stats.members * 400)}</span>` : ""}
       ${stats.waffles > 0 ? `· 🧇 ${stats.waffles} vafler <span class="plus">+${kr(stats.waffleIncome)}</span>` : ""}
       · diesel <span class="minus">−${kr(diesel)}</span>
-      ${power > 0 ? `· strøm <span class="minus">−${kr(power)}</span>` : ""}`);
+      ${guests > 0 ? `· 🛏 ${guests} gjester <span class="plus">+${kr(rooms)}</span>` : ""}
+      ${power > 0 ? `· drift <span class="minus">−${kr(power)}</span>` : ""}`);
   };
 
   /** Whether a paper opens by itself when it comes out (the default) or only announces itself. */
@@ -666,7 +814,7 @@ async function main() {
   const paperButton = document.getElementById("paper-button")!;
   const trackKm = () => (tracks.size * map.tileSize) / 1000;
 
-  const logNews = (day: number, stats: DayStats) => {
+  const logNews = (day: number, stats: DayStats, guests: number) => {
     let groomed = 0;
     let trampled = 0;
     let icy = 0;
@@ -699,6 +847,9 @@ async function main() {
       kioskBought: kioskBoughtToday,
       kioskUpgrade: kioskUpgradedToday,
       expertsHired: expertsHiredToday,
+      cabinClaimed: cabinClaimedToday,
+      cabinBuilt: cabinBuiltToday,
+      guests,
       kioskBroken: kioskBrokenToday,
       kiosks: kiosks.length,
       icy: icy / n,
@@ -709,6 +860,8 @@ async function main() {
     kioskUpgradedToday = false;
     kioskBrokenToday = false;
     expertsHiredToday = false;
+    cabinClaimedToday = null;
+    cabinBuiltToday = null;
     snowToday = 0;
     rainToday = 0;
     if (day + 1 >= paper.pressUntil) {
@@ -969,6 +1122,7 @@ async function main() {
 
   const redrawTracks = () => {
     refreshTrailheads();
+    claimCabins();
     trackEnds = [...tracks.each()].filter(([x, y]) => tracks.neighbours(x, y).length <= 1);
     trackLayer.clear();
     const { lines, dots } = tracks.segments();
@@ -1144,6 +1298,14 @@ async function main() {
         (${Math.round(tracks.quality(x, y, weather) * 100)} %)<br>
         nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}<br>
         ≈ ${Math.round(tracks.usage[i])} skiløpere siste døgnet`;
+    } else if (tool === "cabin") {
+      const existing = cabinNear(x, y, 1);
+      const problem = existing ? null : cabinProblem(x, y);
+      action = existing
+        ? `🛖 ${existing.title}: klikk for å åpne`
+        : problem
+          ? `<span class="minus">${problem}</span>`
+          : `🛖 Hytte her: dugnadskoie fra ${kr(CABIN_TIERS[1].price)}`;
     } else if (tool === "garage") {
       const problem = garageProblem(x, y);
       action = problem ? `<span class="minus">${problem}</span>` : `Garasje her: ${fleet.nextGarageCost === 0 ? "gratis" : kr(fleet.nextGarageCost)}`;
@@ -1461,6 +1623,15 @@ async function main() {
    * straight line from the crew, when the crew stands on track close enough, or starts a stroke there.
    */
   const tapTile = (tx: number, ty: number) => {
+    if (tool === "cabin") {
+      cabinTool(tx, ty);
+      return;
+    }
+    const cabin = cabinNear(tx, ty, 1);
+    if (cabin && tool === "build") {
+      openCabin(cabin.x, cabin.y);
+      return;
+    }
     if (tool === "remove") {
       [crew.x, crew.y] = [tx, ty];
       if (tracks.has(tx, ty)) {
@@ -1728,6 +1899,8 @@ async function main() {
   };
   window.addEventListener("pointerup", endTouch);
   window.addEventListener("pointercancel", endTouch);
+  // A tap on the map must not also click whatever it just opened under the finger (a dialog, the build plan).
+  app.canvas.addEventListener("touchend", (e) => e.preventDefault(), { passive: false });
 
   app.canvas.addEventListener("pointerdown", (e) => {
     if (!toolMenu.hidden) {
@@ -1749,7 +1922,7 @@ async function main() {
     if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
       return;
     }
-    const fingerTool = e.pointerType === "touch" && (tool === "build" || tool === "remove");
+    const fingerTool = e.pointerType === "touch" && (tool === "build" || tool === "remove" || tool === "cabin");
     if (e.button === 0 && fingerTool) {
       // A finger may be about to tap, drag or pinch: wait and see before laying anything.
       pendingTouch = { sx: e.offsetX, sy: e.offsetY, tile: tileAt(e.offsetX, e.offsetY) };
@@ -1768,6 +1941,18 @@ async function main() {
     if (e.button === 0 && tool === "garage") {
       placeGarage(...tileAt(e.offsetX, e.offsetY));
       return;
+    }
+    if (e.button === 0 && tool === "cabin") {
+      cabinTool(...tileAt(e.offsetX, e.offsetY));
+      return;
+    }
+    if (e.button === 0 && tool === "look") {
+      const [lx, ly] = tileAt(e.offsetX, e.offsetY);
+      const cabin = cabinNear(lx, ly, 1);
+      if (cabin) {
+        openCabin(cabin.x, cabin.y);
+        return;
+      }
     }
     if (e.button === 0 && tool !== "look") {
       beginStroke(...tileAt(e.offsetX, e.offsetY));
@@ -2010,7 +2195,7 @@ async function main() {
       toolMenu.hidden = true;
       clearPlan();
     } else {
-      const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage" } as Record<string, Tool>)[e.code];
+      const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage", Digit5: "cabin" } as Record<string, Tool>)[e.code];
       if (!t) {
         return;
       }
@@ -2041,7 +2226,7 @@ async function main() {
     weather: { snowDepth: weather.snowDepth, plans: weather.allPlans() },
     tracks: encodeTracks(map, tracks),
     garages: fleet.groomers.map((g) => ({ tile: map.toGrid(g.garage.x, g.garage.y), totalGroomed: g.totalGroomed })),
-    kiosks: kiosks.map((k) => ({ tile: map.toGrid(k.x, k.y), tier: k.tier, soldToday: k.soldToday, broken: k.broken, experts: k.experts })),
+    kiosks: kiosks.map((k) => ({ tile: map.toGrid(k.x, k.y), tier: k.tier, soldToday: k.soldToday, broken: k.broken, experts: k.experts, kind: k.kind, name: k.name })),
     schedule: fleet.schedule,
     reports: reports.map(({ report, rosy }) => ({ ...report, rosyChosen: rosy })),
     crew: map.toGrid(crew.x, crew.y),
@@ -2077,8 +2262,11 @@ async function main() {
     fleet.schedule = save.schedule;
     for (const saved of save.kiosks ?? []) {
       const local = map.fromGrid(saved.tile);
-      if (local && fleet.garages.some((g) => g.x === local[0] && g.y === local[1])) {
-        const k = placeKiosk(local[0], local[1], Math.min(saved.tier, KIOSK_TIERS.length - 1));
+      const cabin = saved.kind === "cabin";
+      if (local && (cabin || fleet.garages.some((g) => g.x === local[0] && g.y === local[1]))) {
+        const k = cabin
+          ? placeOutlet(local[0], local[1], Math.min(saved.tier, CABIN_TIERS.length - 1), "cabin", saved.name ?? null)
+          : placeKiosk(local[0], local[1], Math.min(saved.tier, KIOSK_TIERS.length - 1));
         k.soldToday = saved.soldToday;
         k.broken = saved.broken;
         if (saved.experts) {
@@ -2313,6 +2501,24 @@ function addPoiLabels(map: GameMap, layer: Container): { node: Container; kind: 
     }
     if (p.kind === "parking") {
       add(signboard(SIGN_STYLE.parking, "", at), p.kind);
+      continue;
+    }
+    if (p.kind === "cafe" || p.kind === "cabin") {
+      const label = new Text({
+        text: p.kind === "cafe" ? `☕ ${p.name}` : `⌂ ${p.name}`,
+        style: {
+          fontFamily: "system-ui, sans-serif",
+          fontSize: p.kind === "cafe" ? 11 : 10,
+          fontWeight: p.kind === "cafe" ? "700" : "400",
+          fontStyle: p.kind === "cabin" ? "italic" : "normal",
+          fill: p.kind === "cafe" ? 0x8a3b12 : 0x4b5a64,
+          stroke: { color: 0xffffff, width: 4, join: "round" },
+        },
+        resolution: 3,
+      });
+      label.anchor.set(0.5, 1);
+      label.position.set(at.x, at.y - 2);
+      add(label, p.kind);
       continue;
     }
     const crowded = map.pois.some(

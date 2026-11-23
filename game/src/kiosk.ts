@@ -22,6 +22,9 @@ export interface KioskTier {
   dailyCost: number;
   /** Chance per day that it will not work tomorrow. */
   breakdown: number;
+  /** Rooms let for the night, and what a room brings in. */
+  rooms?: number;
+  roomPrice?: number;
 }
 
 export const KIOSK_TIERS: KioskTier[] = [
@@ -88,6 +91,63 @@ export const KIOSK_TIERS: KioskTier[] = [
 ];
 
 /**
+ * Cabins out along the track. The first is one that already stands there and is claimed by
+ * reaching it with track; the others the club builds.
+ */
+export const CABIN_TIERS: KioskTier[] = [
+  {
+    name: "Stue med servering",
+    short: "Stue",
+    price: 0,
+    pitch: "En stue som allerede står i marka, med kaffe, vafler og en peis. Nå leder løypa hit.",
+    capacity: 400,
+    salePrice: 40,
+    ingredients: 10,
+    appeal: 0.5,
+    draw: 0.08,
+    open: [10, 16],
+    weekendsOnly: false,
+    dailyCost: 0,
+    breakdown: 0,
+  },
+  {
+    name: "Dugnadskoie",
+    short: "Dugnadskoie",
+    price: 30_000,
+    pitch: "En liten tømmerkoie med vedovn. Frivillige selger vafler og kaffe i helgene, og folk legger turen hit.",
+    capacity: 200,
+    salePrice: 35,
+    ingredients: 9,
+    appeal: 0.45,
+    draw: 0.05,
+    open: [10, 16],
+    weekendsOnly: true,
+    dailyCost: 0,
+    breakdown: 0,
+  },
+  {
+    name: "Betjent hytte",
+    short: "Betjent hytte",
+    price: 450_000,
+    pitch: "Ei skikkelig turisthytte med kjøkken, betjening og ti rom. Middag, vafler og overnatting hver dag. Betjeningen må ha lønn.",
+    capacity: 800,
+    salePrice: 45,
+    ingredients: 11,
+    appeal: 0.6,
+    draw: 0.15,
+    open: [9, 19],
+    weekendsOnly: false,
+    dailyCost: 2_500,
+    breakdown: 0,
+    rooms: 10,
+    roomPrice: 1_100,
+  },
+];
+
+/** A cabin within this many tiles of the track counts as reached. */
+export const CABIN_REACH = 2;
+
+/**
  * An agreement with Nittedal Skytterlag: their best waffle makers staff the stand at weekends.
  * More waffles, a faster queue, and waffles good enough that people pay a little extra.
  */
@@ -105,7 +165,9 @@ export const EXPERTS = {
 /** How close, in tiles, a skier must pass to smell the waffles. */
 export const KIOSK_REACH = 3;
 /** However many stands there are, they draw at most this much extra turnout. */
-const MAX_DRAW = 0.3;
+const MAX_DRAW = 0.4;
+
+export type OutletKind = "stand" | "cabin";
 
 export class Kiosk {
   readonly sprite = new Container();
@@ -114,25 +176,47 @@ export class Kiosk {
   broken = false;
   /** Nittedal Skytterlag helps out at weekends. */
   experts = false;
+  /** Overnight guests, for a cabin with rooms. */
+  guestsLastNight = 0;
 
   constructor(
-    /** The garage it stands beside. */
+    /** The garage it stands beside, or the cabin's own tile. */
     readonly x: number,
     readonly y: number,
     public tier: number,
+    readonly kind: OutletKind = "stand",
+    readonly name: string | null = null,
   ) {
-    this.sprite.position.set((x + 2.4) * PX, (y + 0.4) * PX);
-    this.sprite.scale.set(1.35);
+    if (kind === "cabin") {
+      this.sprite.position.set((x + 0.5) * PX, (y + 0.6) * PX);
+    } else {
+      this.sprite.position.set((x + 2.4) * PX, (y + 0.4) * PX);
+      this.sprite.scale.set(1.35);
+    }
     this.redraw();
   }
 
   get spec(): KioskTier {
-    return KIOSK_TIERS[this.tier];
+    return (this.kind === "cabin" ? CABIN_TIERS : KIOSK_TIERS)[this.tier];
   }
 
-  /** Where the stand's counter is, in tiles: sales are measured from here. */
+  get tiers(): KioskTier[] {
+    return this.kind === "cabin" ? CABIN_TIERS : KIOSK_TIERS;
+  }
+
+  /** What the player calls it. */
+  get title(): string {
+    return this.name ?? this.spec.short;
+  }
+
+  /** Where the counter is, in tiles: sales are measured from here. */
   get spot(): [number, number] {
-    return [this.x + 2, this.y];
+    return this.kind === "cabin" ? [this.x, this.y] : [this.x + 2, this.y];
+  }
+
+  /** The waffle experts come to cabins of every kind, but not to a camping table. */
+  canHireExperts(): boolean {
+    return this.kind === "cabin" || this.tier >= EXPERTS.minTier;
   }
 
   isOpen(day: number, hourOfDay: number): boolean {
@@ -171,8 +255,40 @@ export class Kiosk {
     this.redraw();
   }
 
+  /** A cabin: a log hut, or a bigger lodge with a chimney and lit windows. */
+  private drawCabin() {
+  const g = new Graphics();
+  const s = PX;
+  const big = this.tier === 2;
+  const w = big ? 2.2 : 1.4;
+  const h = big ? 1.2 : 0.9;
+  g.ellipse(0, s * 0.35, s * w * 0.65, s * 0.22).fill({ color: 0x3c548c, alpha: 0.22 });
+  g.rect(-s * w / 2, -s * h + s * 0.3, s * w, s * h).fill(this.tier === 1 ? 0x7a4e2c : 0x9a3b2e).stroke({ width: 1, color: 0x3a2414 });
+  for (let i = 1; i < 4; i++) {
+    g.moveTo(-s * w / 2, -s * h + s * 0.3 + (s * h * i) / 4).lineTo(s * w / 2, -s * h + s * 0.3 + (s * h * i) / 4);
+  }
+  g.stroke({ width: 0.5, color: 0x3a2414, alpha: 0.6 });
+  g.poly([-s * w * 0.62, -s * h + s * 0.3, 0, -s * h - s * 0.45, s * w * 0.62, -s * h + s * 0.3]).fill(0xfbfdff).stroke({ width: 1, color: 0x5b6270, join: "round" });
+  const windows = big ? [-0.6, 0, 0.6] : [-0.3, 0.3];
+  for (const wx of windows) {
+    g.rect(s * wx - s * 0.13, -s * h * 0.55, s * 0.26, s * 0.26).fill(0xffd77a).stroke({ width: 0.6, color: 0x3a2414 });
+  }
+  g.rect(-s * 0.12, -s * 0.15, s * 0.24, s * 0.45).fill(0x3a2414);
+  if (big || this.tier === 0) {
+    g.rect(s * w * 0.25, -s * h - s * 0.3, s * 0.18, s * 0.4).fill(0x5a5a5a);
+  }
+  const sign = new Text({ text: this.experts ? "🧇🎯" : "🧇", style: { fontSize: 9 }, resolution: 4 });
+  sign.anchor.set(0.5, 1);
+  sign.position.set(0, -s * h - s * 0.45);
+  this.sprite.addChild(g, sign);
+  }
+
   redraw() {
     this.sprite.removeChildren().forEach((c) => c.destroy({ children: true }));
+    if (this.kind === "cabin") {
+      this.drawCabin();
+      return;
+    }
     const g = new Graphics();
     const s = PX;
     g.ellipse(0, s * 0.55, s * (0.7 + this.tier * 0.2), s * 0.18).fill({ color: 0x3c548c, alpha: 0.22 });
@@ -222,7 +338,8 @@ export class Kiosk {
   }
 }
 
-/** Extra turnout from all the club's stands together. */
+
+/** Extra turnout from all the club's stands and cabins together. */
 export function kioskDraw(kiosks: Kiosk[]): number {
   return Math.min(MAX_DRAW, kiosks.reduce((sum, k) => sum + k.spec.draw, 0));
 }

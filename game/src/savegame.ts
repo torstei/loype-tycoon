@@ -51,7 +51,7 @@ export interface SaveGame {
   reports: SavedReport[];
   crew: GridTile;
   /** Absent in saves from before waffle stands existed. */
-  kiosks?: { tile: GridTile; tier: number; soldToday: number; broken: boolean; experts?: boolean }[];
+  kiosks?: { tile: GridTile; tier: number; soldToday: number; broken: boolean; experts?: boolean; kind?: "stand" | "cabin"; name?: string | null }[];
   /** Absent in saves from before the paper existed. */
   varingen?: {
     editions: Edition[];

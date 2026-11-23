@@ -25,6 +25,9 @@ export interface DayNews {
   kioskBought?: string | null;
   kioskUpgrade?: boolean;
   expertsHired?: boolean;
+  cabinClaimed?: string | null;
+  cabinBuilt?: string | null;
+  guests?: number;
   kioskBroken?: boolean;
   kiosks?: number;
   icy: number;
@@ -267,6 +270,43 @@ function stories(input: EditionInput): Story[] {
       lead: upgraded
         ? `Løypelaget har oppgradert til «${bought.at(-1)}». – Det var kø ved luka hver lørdag, forklarer løypelaget.`
         : `Løypelaget har satt opp «${bought.at(-1)}». Duften når helt ned til parkeringen.`,
+      body: [],
+    });
+  }
+  for (const name of week.map((d) => d.cabinClaimed).filter((n): n is string => !!n)) {
+    out.push({
+      score: 6,
+      tone: 1,
+      kicker: "Turmål",
+      headline: `Nå går løypa helt til ${name}`,
+      lead: `Løypelaget har kjørt opp spor til ${name}. Vaffelrøra er klar, og peisen er tent.`,
+      body: [
+        `– Endelig har turen et mål. Før gikk vi bare rundt, sier ${person(seed + 29, NORTH)}.`,
+        `Vertskapet melder om god pågang allerede første helg.`,
+      ],
+    });
+  }
+  for (const what of week.map((d) => d.cabinBuilt).filter((n): n is string => !!n)) {
+    const staffed = what.startsWith("Betjent");
+    out.push({
+      score: staffed ? 7 : 4,
+      tone: staffed ? 0 : 1,
+      kicker: staffed ? "Storsatsing" : "Dugnad",
+      headline: staffed ? `Løypelaget åpner betjent hytte` : `Ny dugnadskoie i marka`,
+      lead: staffed
+        ? `${what}: ti rom, kjøkken og betjening. Løypelaget har lånt penger av nesten alle.`
+        : `${what}. Frivillige selger vafler og kaffe i helgene.`,
+      body: staffed ? [`– Vi har tro på det, sier kassereren, og ser bort.`] : [],
+    });
+  }
+  const guests = sum(week, (d) => d.guests ?? 0);
+  if (guests >= 30) {
+    out.push({
+      score: 3,
+      tone: 1,
+      kicker: "Overnatting",
+      headline: `${guests} overnattinger på hytta denne uka`,
+      lead: "Folk kommer på ski med sekk og sovepose og blir til frokost.",
       body: [],
     });
   }

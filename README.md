@@ -118,6 +118,19 @@ their waffle experts staff it every Saturday and Sunday, making half as many waf
 drawing more people to stop and charging 5 kr more for them. In season runs it pays for
 itself in about seven weeks at a booth and three and a half at a kiosk.
 
+## Cabins
+
+Cabins give skiers somewhere to go. Existing serviced cabins and cafés from OSM (Gørjahytta,
+Varingstua, Cafe Snøtunet and others, marked ☕ on the map) are claimed by bringing the track
+within two tiles; they then sell waffles for the club. Tool `5` (🛖) builds new ones beside
+the track: a dugnadskoie (30 000 kr, volunteers selling waffles at weekends) or a staffed
+cabin (450 000 kr, open daily with food, waffles and ten rooms let for the night, which fill
+with the club's reputation, at weekends and in the holidays, against 2 500 kr a day in wages).
+Skiers who have not yet visited a cabin lean towards it while it is within reach of their
+trip, and a trip that reaches one counts for more. Nittedal Skytterlag's waffle experts can
+be hired at any cabin. In season runs a dugnadskoie pays for itself in about seven weeks and
+a staffed cabin in about twelve. Plain cabins in OSM (⌂) are landmarks only.
+
 ## Varingen
 
 The local paper comes out every Thursday morning (`V`). Its front page is the week's biggest
