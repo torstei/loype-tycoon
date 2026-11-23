@@ -77,6 +77,7 @@ const TOOL_ICONS: Record<Tool, string> = { look: "👀", build: "⛷", remove: "
 /** Below this window width (or on a touch-only device) the tools move to a bar at the bottom. */
 const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
+const AUTO_OPEN = "loype-tycoon:auto-open:";
 /** On a phone the tile info goes away by itself, since there is no pointer leaving to hide it. */
 const COMPACT_INFO_MS = 5000;
 /** How far a finger may move, in screen pixels, and still count as a tap. */
@@ -403,12 +404,18 @@ async function main() {
 
   const toast = document.getElementById("toast")!;
   let toastTimer = 0;
-  const showToast = (html: string) => {
+  const showToast = (html: string, ms = 7000) => {
     toast.innerHTML = html;
     toast.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => (toast.hidden = true), 7000);
+    toastTimer = window.setTimeout(() => (toast.hidden = true), ms);
   };
+  toast.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("[data-open='paper']")) {
+      toast.hidden = true;
+      showPaper(true);
+    }
+  });
 
   const kiosks = crowd.kiosks;
   const kioskAt = (x: number, y: number) => kiosks.find((k) => k.x === x && k.y === y);
@@ -539,6 +546,31 @@ async function main() {
       ${power > 0 ? `· strøm <span class="minus">−${kr(power)}</span>` : ""}`);
   };
 
+  /** Whether a paper opens by itself when it comes out (the default) or only announces itself. */
+  const autoOpen = (which: "paper" | "report"): boolean => {
+    try {
+      return localStorage.getItem(`${AUTO_OPEN}${which}`) !== "0";
+    } catch {
+      return true;
+    }
+  };
+  const autoOpenToggle = (which: "paper" | "report") =>
+    `<label class="auto-open"><input type="checkbox" data-auto="${which}" ${autoOpen(which) ? "checked" : ""}> Åpne automatisk når den kommer ut</label>`;
+  const toggleAutoOpen = (e: Event): boolean => {
+    const target = e.target as HTMLElement;
+    const box = target.closest<HTMLInputElement>("input[data-auto]");
+    if (!box) {
+      // A click on the label text is passed on to the box; leave the panel alone until then.
+      return target.closest("label.auto-open") !== null;
+    }
+    try {
+      localStorage.setItem(`${AUTO_OPEN}${box.dataset.auto}`, box.checked ? "1" : "0");
+    } catch {
+      // Not remembered between visits; the box still applies for now.
+    }
+    return true;
+  };
+
   const paper = {
     editions: [] as Edition[],
     week: [] as DayNews[],
@@ -626,9 +658,17 @@ async function main() {
     crowd.press = 1 + edition.tone * PRESS_DEMAND;
     paper.pressUntil = clock.day + PRESS_DAYS;
     const effect = edition.tone > 0 ? "God omtale: flere tar turen hit i helgen." : edition.tone < 0 ? "Dårlig omtale: noen blir hjemme i helgen." : "";
-    showToast(`🗞 <strong>Varingen er ute:</strong> «${edition.headline}» ${effect}`);
+    if (autoOpen("paper")) {
+      showPaper(true);
+      if (effect) {
+        showToast(`🗞 ${effect}`);
+      }
+    } else {
+      showToast(`🗞 <strong>Varingen er ute:</strong> «${edition.headline}» ${effect} <button class="read" data-open="paper">Les avisa</button>`, 15000);
+    }
     if (paperPanel.hidden) {
       paperButton.classList.add("unread");
+      barShow.classList.add("unread");
     } else {
       renderPaper();
     }
@@ -636,8 +676,12 @@ async function main() {
 
   const showPaper = (open: boolean) => {
     paperPanel.hidden = !open;
+    if (open && document.documentElement.classList.contains("compact")) {
+      reportPanel.hidden = true;
+    }
     if (open) {
       paperButton.classList.remove("unread");
+      barShow.classList.remove("unread");
       renderPaper();
     }
   };
@@ -650,10 +694,13 @@ async function main() {
         <button data-p="next" ${editionIndex >= paper.editions.length - 1 ? "disabled" : ""}>›</button>
         <button data-p="close">✕</button>
       </div>`;
-    paperPanel.innerHTML = `${bar}<div class="page">${edition ? edition.html : "<p class=\"empty\">Varingen kommer ut hver torsdag. Gi dem noe å skrive om.</p>"}</div>`;
+    paperPanel.innerHTML = `${bar}<div class="page">${edition ? edition.html : "<p class=\"empty\">Varingen kommer ut hver torsdag. Gi dem noe å skrive om.</p>"}</div>${autoOpenToggle("paper")}`;
   };
 
   paperPanel.addEventListener("click", (e) => {
+    if (toggleAutoOpen(e)) {
+      return;
+    }
     const action = (e.target as HTMLElement).closest("button")?.dataset.p;
     if (action === "close") {
       showPaper(false);
@@ -675,6 +722,9 @@ async function main() {
 
   const showReport = (open: boolean) => {
     reportPanel.hidden = !open;
+    if (open && document.documentElement.classList.contains("compact")) {
+      paperPanel.hidden = true;
+    }
     if (open) {
       reportButton.classList.remove("unread");
       renderReport();
@@ -702,10 +752,13 @@ async function main() {
         <button data-r="rosy" class="${entry.rosy ? "active" : ""}">Pynt på den ✨</button>
         <span>${entry.rosy ? "Flere kommer, men skuffer du dem, svir det." : "Det som står, stemmer."}</span>
       </div>` : ""}
-      <div class="body">${entry.rosy ? entry.report.rosy : entry.report.honest}</div>`;
+      <div class="body">${entry.rosy ? entry.report.rosy : entry.report.honest}</div>${autoOpenToggle("report")}`;
   };
 
   reportPanel.addEventListener("click", (e) => {
+    if (toggleAutoOpen(e)) {
+      return;
+    }
     const action = (e.target as HTMLElement).closest("button")?.dataset.r;
     const entry = reports[reportIndex];
     if (action === "close") {
@@ -742,7 +795,7 @@ async function main() {
     rainSinceReport = 0;
     reports.push({ report, rosy: false });
     reportIndex = reports.length - 1;
-    if (reports.length === 1) {
+    if (reports.length === 1 || autoOpen("report")) {
       showReport(true);
     } else if (reportPanel.hidden) {
       reportButton.classList.add("unread");
