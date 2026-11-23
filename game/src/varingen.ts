@@ -24,6 +24,7 @@ export interface DayNews {
   waffles?: number;
   kioskBought?: string | null;
   kioskUpgrade?: boolean;
+  expertsHired?: boolean;
   kioskBroken?: boolean;
   kiosks?: number;
   icy: number;
@@ -267,6 +268,19 @@ function stories(input: EditionInput): Story[] {
         ? `Løypelaget har oppgradert til «${bought.at(-1)}». – Det var kø ved luka hver lørdag, forklarer løypelaget.`
         : `Løypelaget har satt opp «${bought.at(-1)}». Duften når helt ned til parkeringen.`,
       body: [],
+    });
+  }
+  if (week.some((d) => d.expertsHired)) {
+    out.push({
+      score: 5,
+      tone: 1,
+      kicker: "Samarbeid",
+      headline: "Skytterlaget treffer blink med vaflene",
+      lead: "Løypelaget har inngått avtale med Nittedal Skytterlag: i helgene er det skytterne som står ved vaffeljernet.",
+      body: [
+        `– Det handler om konsentrasjon, pust og presis dosering av røra, sier en av skytterlagets vaffelsteikere. – Akkurat som på standplass.`,
+        `– De beste vaflene jeg har smakt. Og jeg har smakt mange, sier ${person(seed + 27, NORTH)}.`,
+      ],
     });
   }
   if (waffles >= 200) {

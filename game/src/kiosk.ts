@@ -87,6 +87,21 @@ export const KIOSK_TIERS: KioskTier[] = [
   },
 ];
 
+/**
+ * An agreement with Nittedal Skytterlag: their best waffle makers staff the stand at weekends.
+ * More waffles, a faster queue, and waffles good enough that people pay a little extra.
+ */
+export const EXPERTS = {
+  name: "Vaffeleksperter fra Nittedal Skytterlag",
+  pitch: "Skytterlaget stiller med sine beste vaffelsteikere hver lørdag og søndag. Treffsikre på røra, jevnt stekt, aldri brent. Flere vafler, kortere kø, og folk betaler gjerne litt ekstra for skyttervafler.",
+  price: 15_000,
+  /** Not at a camping table: they need at least the booth. */
+  minTier: 1,
+  capacity: 1.5,
+  appeal: 1.3,
+  extraPrice: 5,
+};
+
 /** How close, in tiles, a skier must pass to smell the waffles. */
 export const KIOSK_REACH = 3;
 /** However many stands there are, they draw at most this much extra turnout. */
@@ -97,6 +112,8 @@ export class Kiosk {
   soldToday = 0;
   /** Out of order for the current day. */
   broken = false;
+  /** Nittedal Skytterlag helps out at weekends. */
+  experts = false;
 
   constructor(
     /** The garage it stands beside. */
@@ -123,8 +140,30 @@ export class Kiosk {
     return !this.broken && hourOfDay >= from && hourOfDay < to && (!this.spec.weekendsOnly || isWeekend(day));
   }
 
-  hasWaffles(): boolean {
-    return this.soldToday < this.spec.capacity;
+  /** The waffle experts are on duty: the stand has the agreement and it is the weekend. */
+  expertsOn(day: number): boolean {
+    return this.experts && isWeekend(day);
+  }
+
+  capacityOn(day: number): number {
+    return Math.round(this.spec.capacity * (this.expertsOn(day) ? EXPERTS.capacity : 1));
+  }
+
+  appealOn(day: number): number {
+    return this.spec.appeal * (this.expertsOn(day) ? EXPERTS.appeal : 1);
+  }
+
+  salePriceOn(day: number): number {
+    return this.spec.salePrice + (this.expertsOn(day) ? EXPERTS.extraPrice : 0);
+  }
+
+  hasWaffles(day: number): boolean {
+    return this.soldToday < this.capacityOn(day);
+  }
+
+  hireExperts() {
+    this.experts = true;
+    this.redraw();
   }
 
   upgrade(tier: number) {
@@ -174,6 +213,12 @@ export class Kiosk {
     sign.anchor.set(0.5, 1);
     sign.position.set(0, -s * (this.tier === 0 ? 0.3 : this.tier === 3 ? 1.15 : 0.85));
     this.sprite.addChild(g, sign);
+    if (this.experts) {
+      const badge = new Text({ text: "🎯", style: { fontSize: 8 }, resolution: 4 });
+      badge.anchor.set(0, 1);
+      badge.position.set(sign.width / 2 - 1, sign.y - sign.height * 0.45);
+      this.sprite.addChild(badge);
+    }
   }
 }
 
