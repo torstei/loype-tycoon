@@ -26,7 +26,7 @@ import {
   writeSlot,
 } from "./savegame";
 import { Skijorer } from "./skijor";
-import { Crowd, DayStats, emptyDay, MEMBERSHIP_FEE, Trailhead } from "./skiers";
+import { Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
@@ -34,7 +34,7 @@ import { landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
 import { Flag, FLAG_NAMES, Terrain, TERRAIN_NAMES } from "./terrain";
 import { askCrossing } from "./crossing";
-import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TrackNetwork } from "./tracks";
+import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
 import { Precipitation, Whimsy } from "./whimsy";
 import "./style.css";
@@ -161,9 +161,10 @@ async function main() {
 
   const trackLayer = new Graphics();
   const trailheadLayer = new Container();
+  const headLabels = new Container();
   const skijorer = new Skijorer(map);
   const kioskLayer = new Container();
-  world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, kioskLayer, fleet.machineLayer, crowd.layer, skijorer.layer);
+  world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, kioskLayer, fleet.machineLayer, crowd.layer, skijorer.layer, headLabels);
   const cursor = new Graphics();
   const endsLayer = new Graphics();
   const refusalTag = new Container();
@@ -322,6 +323,10 @@ async function main() {
     whimsy.detail = s >= OVERVIEW_BELOW;
     crowd.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight());
     skijorer.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight(), crowd.lights);
+    headLabels.visible = s >= OVERVIEW_BELOW;
+    for (const label of headLabels.children) {
+      label.scale.set(s < 1 ? 1 / s : 1);
+    }
     for (const { node, kind } of signs) {
       node.scale.set(s < 1 ? 1 / s : 1);
       node.visible = s >= OVERVIEW_BELOW || (kind !== "parking" && kind !== "cabin");
@@ -1168,12 +1173,18 @@ async function main() {
     }
     const choosingHome = fleet.garages.length === 0;
     const starting = tracks.size === 0;
-    const signature = choosingHome ? "home" : starting ? "start" : connected.map((h) => `${h.x},${h.y}`).join(";");
+    const showAll = choosingHome || (!starting && tool === "build");
+    const signature = choosingHome
+      ? "home"
+      : starting
+        ? "start"
+        : `${showAll ? "all" : "own"}|${Math.round(crowd.reputation * 10)}|${Math.round(tracks.size / 20)}|${connected.map((h) => `${h.x},${h.y}`).join(";")}`;
     if (signature === trailheadSignature) {
       return;
     }
     trailheadSignature = signature;
     trailheadLayer.removeChildren().forEach((c) => c.destroy({ children: true }));
+    headLabels.removeChildren().forEach((c) => c.destroy({ children: true }));
     if (!choosingHome && starting) {
       const garage = fleet.garages[0];
       const g = new Graphics()
@@ -1183,36 +1194,60 @@ async function main() {
       trailheadLayer.addChild(g);
       return;
     }
-    if (choosingHome) {
-      for (const h of crowd.trailheads) {
-        const g = new Graphics()
-          .circle((h.x + 0.5) * PX, (h.y + 0.5) * PX, h.reach * PX)
-          .fill({ color: 0x1f8a3a, alpha: 0.08 })
-          .stroke({ width: 1.5, color: 0x1f8a3a, alpha: 0.5 })
-          .circle((h.x + 0.5) * PX, (h.y + 0.5) * PX, 6)
-          .fill(0x8fa3bf)
-          .stroke({ width: 1.5, color: 0xffffff });
-        const icon = new Text({ text: "⛷", style: { fontSize: 8, fill: 0xffffff }, resolution: 4 });
-        icon.anchor.set(0.5);
-        icon.position.set((h.x + 0.5) * PX, (h.y + 0.5) * PX);
-        trailheadLayer.addChild(g, icon);
+    const open = showAll ? crowd.trailheads.filter((h) => !h.entry) : [];
+    if (open.length > 0) {
+      trailheadLayer.addChild(catchmentSprite(open));
+    }
+    for (const h of [...open, ...connected]) {
+      const cx = (h.x + 0.5) * PX;
+      const cy = (h.y + 0.5) * PX;
+      const g = new Graphics();
+      if (h.entry) {
+        const [ex, ey] = h.entry;
+        g.moveTo(cx, cy).lineTo((ex + 0.5) * PX, (ey + 0.5) * PX).stroke({ width: 1.5, color: 0x1f8a3a, alpha: 0.6 });
       }
-      return;
-    }
-    for (const h of connected) {
-      const [ex, ey] = h.entry!;
-      const g = new Graphics()
-        .moveTo((h.x + 0.5) * PX, (h.y + 0.5) * PX)
-        .lineTo((ex + 0.5) * PX, (ey + 0.5) * PX)
-        .stroke({ width: 1.5, color: 0x1f8a3a, alpha: 0.6 })
-        .circle((h.x + 0.5) * PX, (h.y + 0.5) * PX, 6)
-        .fill(0x1f8a3a)
-        .stroke({ width: 1.5, color: 0xffffff });
-      const icon = new Text({ text: "⛷", style: { fontSize: 8, fill: 0xffffff }, resolution: 4 });
+      const radius = 4 + Math.sqrt(h.kind === "homes" ? h.houses * SKIERS_PER_HOUSE : h.rate) * 1.6;
+      g.circle(cx, cy, radius).fill(h.entry ? 0x1f8a3a : 0x6f8197).stroke({ width: 1.5, color: 0xffffff });
+      const icon = new Text({ text: h.kind === "station" ? "🚉" : h.kind === "parking" ? "P" : "⛷", style: { fontSize: radius * 1.2, fill: 0xffffff, fontWeight: "700" }, resolution: 4 });
       icon.anchor.set(0.5);
-      icon.position.set((h.x + 0.5) * PX, (h.y + 0.5) * PX);
+      icon.position.set(cx, cy);
       trailheadLayer.addChild(g, icon);
+      if (showAll) {
+        const raw = crowd.fineSaturday(h, clock.day, h.entry ? h.network : Math.max(tracks.size, 40));
+        const estimate = raw < 20 ? Math.round(raw) : Math.round(raw / 5) * 5;
+        const label = new Text({
+          text: h.kind !== "homes" ? `≈ ${estimate} en fin lørdag` : h.entry ? `${h.served} av ${h.houses} hus nær løypa · ≈ ${estimate} en fin lørdag` : `${h.houses} hus`,
+          style: { fontSize: 11, fill: 0x16232c, fontWeight: "700", stroke: { color: 0xffffff, width: 3.5 } },
+          resolution: 3,
+        });
+        label.anchor.set(0.5, 0);
+        label.position.set(cx, cy + radius + 2);
+        headLabels.addChild(label);
+      }
     }
+  };
+
+  /** The ground where a track would bring skiers from these trailheads, as one tinted overlay. */
+  const catchmentSprite = (heads: Trailhead[]): Sprite => {
+    const canvas = document.createElement("canvas");
+    canvas.width = map.width;
+    canvas.height = map.height;
+    const ctx = canvas.getContext("2d")!;
+    const img = ctx.createImageData(map.width, map.height);
+    for (const h of heads) {
+      for (const i of h.catchment) {
+        img.data[i * 4] = 0x1f;
+        img.data[i * 4 + 1] = 0x8a;
+        img.data[i * 4 + 2] = 0x3a;
+        img.data[i * 4 + 3] = 64;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const texture = Texture.from(canvas);
+    texture.source.scaleMode = "nearest";
+    const sprite = new Sprite(texture);
+    sprite.scale.set(PX);
+    return sprite;
   };
 
   let groomMap = false;
@@ -1416,7 +1451,7 @@ async function main() {
       const crossing = tracks.crossing[i] as Crossing;
       action = `${crossing !== Crossing.None ? `🌉 ${CROSSING_NAMES[crossing]}<br>` : ""}${tracks.trampled(x, y) ? "🫎 elgspor i sporet<br>" : ""}<strong>Løype: ${CONDITION_NAMES[tracks.condition(x, y, weather)]}</strong>
         (${Math.round(tracks.quality(x, y, weather) * 100)} %)<br>
-        nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}<br>
+        nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}<br>${tillerLine(x, y, i)}
         ≈ ${Math.round(tracks.usage[i])} skiløpere siste døgnet`;
     } else if (CABIN_TOOL_TIER[tool] !== undefined) {
       const spec = CABIN_TIERS[CABIN_TOOL_TIER[tool]!];
@@ -1431,12 +1466,21 @@ async function main() {
       const problem = garageProblem(x, y);
       action = problem ? `<span class="minus">${problem}</span>` : `Garasje her: ${fleet.nextGarageCost === 0 ? "gratis" : kr(fleet.nextGarageCost)}`;
     }
-    const head = crowd.trailheads.find((h) => Math.abs(h.x - x) <= 1 && Math.abs(h.y - y) <= 1);
-    const headLine = head
-      ? `<br><span class="${head.entry ? "plus" : "minus"}">⛷ ${head.name}: ${
-          head.entry ? `koblet til løypa · ${head.today} skiløpere i dag` : `ingen løype innen ${head.reach * map.tileSize} m`
-        }</span>`
-      : "";
+    const headLine = crowd.headsAt(x, y)
+      .map((h) => {
+        const network = h.entry ? h.network : Math.max(tracks.size, 40);
+        if (h.kind === "homes") {
+          const perTen = crowd.fineSaturday(h, clock.day, network, 10 * SKIERS_PER_HOUSE);
+          const served = h.entry ? `${h.served} av ${h.houses} hus bor innen ${HOMES_REACH * map.tileSize} m fra løypa · ${h.today} skiløpere i dag` : `${h.houses} hus, ingen nær løypa ennå`;
+          return `<br><span class="${h.entry ? "plus" : "minus"}">⛷ ${h.name}: ${served}</span><br>
+            <small>Hvert hus innen ${HOMES_REACH * map.tileSize} m fra løypa gir skiløpere: ≈ ${perTen.toFixed(perTen < 1 ? 1 : 0).replace(".", ",")} per 10 hus en fin lørdag</small>`;
+        }
+        const estimate = Math.round(crowd.fineSaturday(h, clock.day, network));
+        return `<br><span class="${h.entry ? "plus" : "minus"}">⛷ ${h.name} (${h.kind === "station" ? "togstasjon" : "parkering"}): ${
+          h.entry ? `koblet til løypa · ${h.today} skiløpere i dag` : "ingen løype her ennå"
+        } · ≈ ${estimate} en fin lørdag</span>`;
+      })
+      .join("");
     info.innerHTML = `
       ${poi ? `<strong>${poi.name}</strong><br>` : ""}
       ${TERRAIN_NAMES[map.terrainAt(x, y)]}${flags.length ? ` · ${flags.join(", ")}` : ""}<br>
@@ -1461,12 +1505,42 @@ async function main() {
    * As in the old tycoon games, new track must grow out of the network; the very first track
    * starts where skiers can reach it. Null when building here is allowed.
    */
+  const nearTrailhead = (x: number, y: number, r: number): boolean => {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (crowd.headsAt(x + dx, y + dy).length > 0) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  /** What the tiller did to this tile's ice, and whether the snow has set since. */
+  const tillerLine = (x: number, y: number, i: number): string => {
+    const depth = weather.snowDepthAt(map.elevationAt(x, y));
+    const lines: string[] = [];
+    const tilled = tracks.tilled[i];
+    if (tilled >= 0 && Number.isFinite(tracks.groomedAt[i])) {
+      lines.push(tilled >= 0.85 ? "🌀 isen ble frest opp: fint resultat"
+        : tilled >= 0.55 ? "🌀 isen ble frest opp: brukbart"
+        : `🌀 fresen fikk lite til${tilled < 0.2 ? " (for lite snø)" : ""}: best fra −2 til −12 °C`);
+    }
+    if (tracks.ice[i] >= 0.4 && depth < TILLER_DEPTH) {
+      lines.push(`<span class="minus">For lite snø til å frese bort isen (trenger ${TILLER_DEPTH} cm)</span>`);
+    }
+    if (tracks.setting[i] > 0) {
+      lines.push(`❄ nypreppet, setter seg (${Math.ceil(tracks.setting[i])} t til)`);
+    }
+    return lines.map((l) => `${l}<br>`).join("");
+  };
+
   /** Why a garage cannot go here, or null if it can. */
   const garageProblem = (x: number, y: number): string | null => {
     if (!fleet.canPlace(x, y, tracks)) {
       return "Kan ikke sette garasje her";
     }
-    if (fleet.garages.length === 0 && !crowd.trailheads.some((h) => Math.hypot(h.x - x, h.y - y) <= h.reach + GARAGE_REACH)) {
+    if (fleet.garages.length === 0 && !nearTrailhead(x, y, GARAGE_REACH)) {
       return "Garasjen må stå nær en stasjon, parkering eller et boligfelt";
     }
     if (budget < fleet.nextGarageCost) {
@@ -1886,10 +1960,10 @@ async function main() {
             : `Krysser Gjøvikbanen: krever undergang til ${kr(crossingOptions("rail", 0)[0].price)}.`;
         });
       lines.push(...new Set(named));
-      const reached = crowd.trailheads.filter((h) => !h.entry && fresh.some((t) => Math.hypot(t.x - h.x, t.y - h.y) <= h.reach));
+      const reached = [...new Set(fresh.flatMap((t) => crowd.headsAt(t.x, t.y)).filter((h) => !h.entry))];
       lines.push(reached.length
         ? `<span class="plus">⛷ Når fram til ${reached.map((h) => h.name).join(" og ")}: flere skiløpere!</span>`
-        : "Når ingen nye stasjoner, parkeringer eller boligfelt.");
+        : "Når ingen nye steder, men et lengre løypenett lokker flere med tog og bil.");
       lines.push(`⛽ ${kr(fresh.length * COST_PER_TILE)} mer i diesel hver gang løypa preppes.`);
       if (blocked) {
         lines.push(`Stopper før: ${(blocked.reason ?? "noe som ikke kan bygges over").toLowerCase()}.`);
@@ -2264,6 +2338,7 @@ async function main() {
     tool = t;
     toolMenu.hidden = true;
     clearPlan();
+    refreshTrailheads();
     refreshHud();
   };
   for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-tool]")) {

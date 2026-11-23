@@ -4,8 +4,8 @@ import { PX } from "./render";
 import { Crossing, RAIL_LEVEL_CROSSING, TrackNetwork } from "./tracks";
 import { Weather } from "./weather";
 
-/** Tiles per game hour: 10 km/h, about what a real snowcat manages. */
-const SPEED = 40;
+/** Tiles per game hour: 8 km/h, a real snowcat's grooming speed. */
+const SPEED = 320;
 export const COST_PER_TILE = 10;
 const MAX_SHIFT_HOURS = 10;
 const MIN_JOB_TILES = 4;
@@ -200,65 +200,68 @@ export class Groomer {
     }
     this.shift += hours;
     let budget = hours * SPEED;
-    while (budget > 0 && this.path.length > 0) {
-      if (this.waiting > 0) {
-        const w = Math.min(this.waiting, budget / SPEED);
-        this.waiting -= w;
-        budget -= w * SPEED;
-        continue;
-      }
-      const [tx, ty] = this.path[0];
-      if (!tracks.has(tx, ty) && this.state === "grooming") {
-        this.path = [];
-        break;
-      }
-      const cx = tx + 0.5;
-      const cy = ty + 0.5;
-      const dist = Math.hypot(cx - this.px, cy - this.py);
-      if (dist > 1e-6) {
-        this.heading = Math.atan2(cy - this.py, cx - this.px);
-      }
-      if (dist <= budget) {
-        this.px = cx;
-        this.py = cy;
-        budget -= dist;
-        this.path.shift();
-        const atGrade = tracks.has(tx, ty) && tracks.crossing[tracks.index(tx, ty)] === Crossing.AtGrade;
-        if (atGrade && !this.onRoad) {
-          this.crossRoad(tx, ty, tracks, ledger);
+    // A stretch can end mid-step: carry on with the time left, or long frames would lose it.
+    for (let legs = 0; legs < 64; legs++) {
+      while (budget > 0 && this.path.length > 0) {
+        if (this.waiting > 0) {
+          const w = Math.min(this.waiting, budget / SPEED);
+          this.waiting -= w;
+          budget -= w * SPEED;
+          continue;
         }
-        this.onRoad = atGrade;
-        if (this.state === "grooming" && tracks.has(tx, ty) && tracks.needsGrooming(tx, ty, weather, now)) {
-          if (!ledger.spend(COST_PER_TILE)) {
-            this.status = "Tom for dieselpenger, kjører hjem";
-            this.headHome(tracks);
-            continue;
+        const [tx, ty] = this.path[0];
+        if (!tracks.has(tx, ty) && this.state === "grooming") {
+          this.path = [];
+          break;
+        }
+        const cx = tx + 0.5;
+        const cy = ty + 0.5;
+        const dist = Math.hypot(cx - this.px, cy - this.py);
+        if (dist > 1e-6) {
+          this.heading = Math.atan2(cy - this.py, cx - this.px);
+        }
+        if (dist <= budget) {
+          this.px = cx;
+          this.py = cy;
+          budget -= dist;
+          this.path.shift();
+          const atGrade = tracks.has(tx, ty) && tracks.crossing[tracks.index(tx, ty)] === Crossing.AtGrade;
+          if (atGrade && !this.onRoad) {
+            this.crossRoad(tx, ty, tracks, ledger);
           }
-          tracks.groom(tx, ty, weather, now);
-          this.groomedTonight++;
-          this.totalGroomed++;
+          this.onRoad = atGrade;
+          if (this.state === "grooming" && tracks.has(tx, ty) && tracks.needsGrooming(tx, ty, weather, now)) {
+            if (!ledger.spend(COST_PER_TILE)) {
+              this.status = "Tom for dieselpenger, kjører hjem";
+              this.headHome(tracks);
+              continue;
+            }
+            tracks.groom(tx, ty, weather, now);
+            this.groomedTonight++;
+            this.totalGroomed++;
+          }
+        } else {
+          this.px += ((cx - this.px) / dist) * budget;
+          this.py += ((cy - this.py) / dist) * budget;
+          budget = 0;
         }
-      } else {
-        this.px += ((cx - this.px) / dist) * budget;
-        this.py += ((cy - this.py) / dist) * budget;
-        budget = 0;
       }
-    }
-    if (this.path.length > 0) {
-      return;
-    }
-    if (this.state === "returning") {
-      this.park();
-      return;
-    }
-    const outOfTime = this.shift >= MAX_SHIFT_HOURS || !inWindow(schedule, hourOfDay);
-    const next = outOfTime ? null : this.findWork(tracks, weather, now);
-    if (next) {
-      this.path = next;
-      this.status = "Prepper";
-    } else {
-      this.status = outOfTime ? "Skiftet er over, kjører hjem" : "Ferdig, kjører hjem";
-      this.headHome(tracks);
+      if (this.path.length > 0 || budget <= 0) {
+        return;
+      }
+      if (this.state === "returning") {
+        this.park();
+        return;
+      }
+      const outOfTime = this.shift >= MAX_SHIFT_HOURS || !inWindow(schedule, hourOfDay);
+      const next = outOfTime ? null : this.findWork(tracks, weather, now);
+      if (next) {
+        this.path = next;
+        this.status = "Prepper";
+      } else {
+        this.status = outOfTime ? "Skiftet er over, kjører hjem" : "Ferdig, kjører hjem";
+        this.headHome(tracks);
+      }
     }
   }
 

@@ -113,7 +113,29 @@ The club starts with 150 000 kr. Track costs by ground (forest 250 kr a tile, op
 600) with a surcharge for slope, so a first 3 km loop costs about 60 000 kr. Income is Vipps
 donations (more from happier skiers), memberships, waffles and cabin rooms; the running costs are
 diesel (10 kr per tile groomed, 400 kr per km) and the cabins' and stands' bills. More skiers come
-from reaching new stations, car parks and housing areas; longer and better track makes them happier.
+from reaching new stations, car parks and houses, and from a longer network; better track makes them
+happier and more generous.
+
+### Where skiers come from
+
+- **Houses**: houses within 50 m of each other form one neighbourhood ("boligfeltet ved …"). Every
+  house within 300 m (12 tiles) of a track sends skiers, so a track through a village serves more
+  houses than one along its edge.
+- **Stations** send a group with each hourly train; **car parks** send a steady stream.
+- **Length**: Norwegians travel for long tracks. Visitors by train and car come roughly in step with
+  the length of the network they reach (3 km ×1, 10 km ×2.6, 30 km ×6.3); locals ski from the door
+  anyway, so length counts less for them.
+- With ⛷ Bygg løype selected, every place not yet reached is shown: a dot sized by how many skiers
+  it can give, the ground where a track would reach it in green, and a label ("222 hus", "≈ 15 en
+  fin lørdag"). Hovering a tile tells how many houses there are and how many live near the track.
+
+### Grooming and the tiller
+
+The snowcat grooms at about 8 km/h, and grooms whatever needs it within its shift. Icy track is milled
+with the tiller (fres), which needs at least 20 cm of snow. It works best from −2 to −12 °C; in a
+thaw it makes slush that freezes back to ice, and in hard frost below −15 °C the crystals stay loose.
+Freshly groomed snow needs about three cold hours to set; skied before that, it wears much faster,
+so grooming at night pays.
 
 📒 Regnskap (click the cash in the top bar, press `K`, or from 💾 Spill) shows income and costs
 for today, the last seven days and the season, with what was spent on building. On a phone the

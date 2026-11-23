@@ -5,6 +5,29 @@ import { Weather } from "./weather";
 /** Below this snow depth a groomer only scrapes gravel. */
 export const MIN_GROOMING_DEPTH = 15;
 
+/** The tiller needs this much snow (cm) to mill ice without bringing up gravel. */
+export const TILLER_DEPTH = 20;
+
+/** Freshly groomed snow sets in this many cold hours; until then it wears much faster. */
+export const SETTING_HOURS = 3;
+
+/**
+ * How much of the ice the tiller breaks up, by air temperature: best a few degrees below zero; in
+ * thaw it makes slush that freezes back to ice, and in hard frost the crystals will not bind.
+ */
+export function tillerResult(t: number): number {
+  if (t > 0) {
+    return 0.3;
+  }
+  if (t > -2) {
+    return 0.6;
+  }
+  if (t >= -12) {
+    return 0.9;
+  }
+  return t >= -18 ? 0.75 : 0.6;
+}
+
 /** Steeper than this (in %), no snowcat goes. */
 export const MAX_SLOPE = 40;
 
@@ -144,6 +167,10 @@ export class TrackNetwork {
   readonly newSnow: Float32Array;
   readonly ice: Float32Array;
   readonly wet: Float32Array;
+  /** Hours freshly groomed snow still needs, cold and left alone, before it has set. */
+  readonly setting: Float32Array;
+  /** How well the tiller broke up the ice at the last grooming, 0 … 1; -1 where there was no ice to mill. */
+  readonly tilled: Float32Array;
   readonly groomedAt: Float64Array;
   readonly crossing: Uint8Array;
   readonly trampledAt: Float64Array;
@@ -156,6 +183,8 @@ export class TrackNetwork {
     this.newSnow = new Float32Array(n);
     this.ice = new Float32Array(n);
     this.wet = new Float32Array(n);
+    this.setting = new Float32Array(n);
+    this.tilled = new Float32Array(n).fill(-1);
     this.groomedAt = new Float64Array(n).fill(-Infinity);
     this.crossing = new Uint8Array(n);
     this.trampledAt = new Float64Array(n).fill(-Infinity);
@@ -265,6 +294,8 @@ export class TrackNetwork {
     this.newSnow[i] = 0;
     this.ice[i] = 0;
     this.wet[i] = 0;
+    this.setting[i] = 0;
+    this.tilled[i] = -1;
     this.groomedAt[i] = -Infinity;
     this.trampledAt[i] = -Infinity;
     this.usage[i] = 0;
@@ -312,7 +343,7 @@ export class TrackNetwork {
       return false;
     }
     const depth = weather.snowDepthAt(this.map.elevationAt(x, y));
-    return depth >= MIN_GROOMING_DEPTH && (this.newSnow[i] >= 3 || this.ice[i] >= 0.4 || this.fresh[i] < 0.7);
+    return depth >= MIN_GROOMING_DEPTH && (this.newSnow[i] >= 3 || (this.ice[i] >= 0.4 && depth >= TILLER_DEPTH) || this.fresh[i] < 0.7);
   }
 
   /** A moose walked here: deep hoofprints in the corduroy until the next grooming. */
@@ -337,19 +368,33 @@ export class TrackNetwork {
     return 1 - Math.exp(-this.usage[this.map.index(x, y)] / 15);
   }
 
-  /** Skis wear the corduroy down a little with every pass. */
+  /** Skis wear the corduroy down a little with every pass, and much faster before it has set. */
   wear(x: number, y: number, amount: number) {
     const i = this.map.index(x, y);
-    this.fresh[i] = Math.max(0, this.fresh[i] - amount);
+    const soft = 1 + 1.5 * Math.min(1, this.setting[i] / SETTING_HOURS);
+    this.fresh[i] = Math.max(0, this.fresh[i] - amount * soft);
   }
 
   groom(x: number, y: number, weather: Weather, now: number) {
     const i = this.map.index(x, y);
-    const depth = weather.snowDepthAt(this.map.elevationAt(x, y));
+    const elevation = this.map.elevationAt(x, y);
+    const depth = weather.snowDepthAt(elevation);
+    const t = weather.localTemperature(elevation);
     this.fresh[i] = depth >= MIN_GROOMING_DEPTH ? 1 : Math.max(this.fresh[i], depth / MIN_GROOMING_DEPTH * 0.5);
     this.newSnow[i] = 0;
-    this.ice[i] *= 0.3;
-    this.wet[i] *= 0.5;
+    if (this.ice[i] >= 0.1) {
+      const result = depth >= TILLER_DEPTH ? tillerResult(t) : 0.15;
+      this.ice[i] *= 1 - result;
+      this.tilled[i] = result;
+      // Too cold, and the milled crystals stay loose sugar instead of binding.
+      if (t < -15 && depth >= TILLER_DEPTH) {
+        this.fresh[i] = Math.min(this.fresh[i], 0.8);
+      }
+    } else {
+      this.tilled[i] = -1;
+    }
+    this.wet[i] *= t > 0 ? 0.8 : 0.5;
+    this.setting[i] = SETTING_HOURS;
     this.groomedAt[i] = now;
   }
 
@@ -363,6 +408,9 @@ export class TrackNetwork {
       const snowHere = t < 0.8 ? snow : 0;
       const rainHere = t < 0.8 ? 0 : rain;
       this.newSnow[i] += snowHere;
+      // Sets fastest in frost, slowly around zero, not at all in a thaw.
+      const sets = t < -1 ? 1 : t <= 1 ? 0.4 : 0;
+      this.setting[i] = Math.max(0, this.setting[i] - hours * sets);
       this.fresh[i] = Math.max(0, this.fresh[i] - hours * 0.006 - weather.wind * hours * 0.0008);
       if (t > 0) {
         this.fresh[i] = Math.max(0, this.fresh[i] - hours * 0.015 * t);
