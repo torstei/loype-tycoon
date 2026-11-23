@@ -79,6 +79,8 @@ async function main() {
   const tracks = new TrackNetwork(map);
   const clock = new GameClock();
   clock.paused = true;
+  /** A new game waits while the player picks a garage and lays the first track, then starts by itself. */
+  let timeStarted = false;
   const weather = new Weather();
   weather.advance(0, clock.hours);
   const fleet = new Fleet(map);
@@ -197,6 +199,11 @@ async function main() {
         redrawTracks();
       }
     }
+    if (!timeStarted && tracks.size > 0 && !painting && !asking) {
+      timeStarted = true;
+      clock.paused = false;
+      showToast("⏱ <strong>Tiden går!</strong> Gunnar prepper i natt, og skiløperne kommer i morgen. Mellomrom pauser, og , / . endrer farten.");
+    }
     sinceHud += dt;
     if (sinceHud >= 0.25) {
       sinceHud = 0;
@@ -257,10 +264,16 @@ async function main() {
     document.getElementById("forecast")!.style.top = top;
     document.getElementById("help")!.style.top = top;
     document.getElementById("report")!.style.top = top;
+    document.getElementById("paused")!.style.top = top;
     document.getElementById("paper")!.style.top = top;
   };
   new ResizeObserver(placePanels).observe(topbar);
   const fleetPanel = document.getElementById("fleet")!;
+  const pausedBanner = document.getElementById("paused")!;
+  pausedBanner.addEventListener("click", () => {
+    clock.paused = false;
+    refreshHud();
+  });
   const forecastPanel = document.getElementById("forecast")!;
 
   const refreshHud = () => {
@@ -282,6 +295,7 @@ async function main() {
       const i = Number(btn.dataset.speed);
       btn.classList.toggle("active", i < 0 ? clock.paused : !clock.paused && clock.speedIndex === i);
     }
+    pausedBanner.hidden = !clock.paused || !timeStarted || asking || clock.seasonOver;
     const garageTool = document.querySelector<HTMLButtonElement>('[data-tool="garage"]')!;
     garageTool.title = `4 · ${fleet.nextGarageCost === 0 ? "gratis" : kr(fleet.nextGarageCost)}`;
     fleetPanel.hidden = fleet.groomers.length === 0;
@@ -855,7 +869,7 @@ async function main() {
       crew.x = x;
       crew.y = y;
       setTool("build");
-      showToast("🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S. Mellomrom starter tiden.");
+      showToast("🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S. Tiden starter når den første løypa er lagt.");
     } else {
       setTool("look");
     }
@@ -1264,6 +1278,7 @@ async function main() {
       banner.classList.add("nudge");
       return;
     }
+    timeStarted = true;
     if (i < 0) {
       clock.paused = !clock.paused;
     } else {
@@ -1374,6 +1389,7 @@ async function main() {
 
   /** Rebuild a saved game on this freshly started page. Returns what to tell the player. */
   const restore = (save: SaveGame): string => {
+    timeStarted = true;
     clock.hours = save.clock.hours;
     clock.speedIndex = save.clock.speedIndex;
     clock.paused = true;
@@ -1546,7 +1562,7 @@ async function main() {
       showToast(`Kunne ikke laste spillet: ${problem}`);
     } else {
       const message = restore(saved);
-      showToast(`💾 Fortsetter spillet fra ${saved.label.split(" · ")[0]}. ${message} Mellomrom starter tiden.`);
+      showToast(`💾 Fortsetter spillet fra ${saved.label.split(" · ")[0]}. ${message}`);
     }
   }
 
