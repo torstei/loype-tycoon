@@ -92,6 +92,9 @@ const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
 async function main() {
   await waitForTouchChoice();
   const updateCompact = () => document.documentElement.classList.toggle("compact", touchOnly() || innerWidth < COMPACT_BELOW);
+  document.documentElement.classList.toggle("touch", touchOnly());
+  /** The tool to fall back to: on a touchscreen one finger already pans, so looking around needs no tool of its own. */
+  const restingTool = (): Tool => (touchOnly() ? "build" : "look");
   updateCompact();
   window.addEventListener("resize", updateCompact);
   const map = await GameMap.load("hakadal");
@@ -1069,7 +1072,7 @@ async function main() {
         ? "Trykk der løypa skal gå: du ser først hvor den blir lagt fra det røde flagget, som nå står ved garasjen, og trykker «Lag løype». Én finger flytter kartet, to fingre zoomer, og ↶ angrer."
         : "Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S."} Tiden starter når den første løypa er lagt.`);
     } else {
-      setTool("look");
+      setTool(restingTool());
     }
     redrawTracks();
     refreshHud();
@@ -1961,7 +1964,7 @@ async function main() {
     forecastDay = clock.day;
     refreshForecast();
     document.getElementById("setup")!.hidden = fleet.garages.length > 0;
-    setTool(fleet.garages.length > 0 ? "look" : "garage");
+    setTool(fleet.garages.length > 0 ? restingTool() : "garage");
     camera.centreOn((crew.x + 0.5) * PX, (crew.y + 0.5) * PX, app.screen.width, app.screen.height);
     const changed = save.map.version !== map.version;
     const notes = [];
