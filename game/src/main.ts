@@ -78,6 +78,8 @@ const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
 /** On a phone the tile info goes away by itself, since there is no pointer leaving to hide it. */
 const COMPACT_INFO_MS = 5000;
+/** A stroke this short when a second finger lands was the start of a pinch, not a track. */
+const SHORT_STROKE = 3;
 /** How far from the network a drag may start and still be linked up automatically, in tiles. */
 const CONNECT_REACH = 3;
 const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
@@ -1049,7 +1051,7 @@ async function main() {
       crew.y = y;
       setTool("build");
       showToast(`🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! ${document.documentElement.classList.contains("compact")
-        ? "Bygg den første løypa ved å dra med fingeren ut fra garasjen. Flytt kartet med 👀."
+        ? "Bygg den første løypa ved å dra med én finger ut fra garasjen. To fingre flytter og zoomer kartet."
         : "Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S."} Tiden starter når den første løypa er lagt.`);
     } else {
       setTool("look");
@@ -1288,7 +1290,59 @@ async function main() {
   let panning: { x: number; y: number } | null = null;
 
   app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  /** Fingers on the map, for two-finger pan and pinch zoom. */
+  const touches = new Map<number, { x: number; y: number }>();
+  let pinch: { distance: number; scale: number; wx: number; wy: number; mx: number; my: number } | null = null;
+  const fingerSpread = () => {
+    const [a, b] = [...touches.values()];
+    return { mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) };
+  };
+
+  /** A second finger landed: the first one meant to move the map, not to lay those tiles. */
+  const undoShortStroke = () => {
+    if (stroke.length > SHORT_STROKE || asking) {
+      return;
+    }
+    for (const { x, y, paid } of stroke) {
+      if (paid > 0 && tracks.has(x, y)) {
+        tracks.remove(x, y);
+        budget += paid;
+      }
+    }
+    stroke = [];
+    redrawTracks();
+    refreshHud();
+  };
+
+  const startPinch = () => {
+    undoShortStroke();
+    painting = null;
+    panning = null;
+    const { mx, my, distance } = fingerSpread();
+    const w = world.toLocal({ x: mx, y: my });
+    pinch = { distance, scale: camera.scale, wx: w.x, wy: w.y, mx, my };
+  };
+
+  const endTouch = (e: PointerEvent) => {
+    if (!touches.delete(e.pointerId) || !pinch || touches.size >= 2) {
+      return;
+    }
+    camera.settle(pinch.mx, pinch.my);
+    pinch = null;
+  };
+  window.addEventListener("pointerup", endTouch);
+  window.addEventListener("pointercancel", endTouch);
+
   app.canvas.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") {
+      touches.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+      if (touches.size === 2) {
+        startPinch();
+      }
+      if (touches.size >= 2 || pinch) {
+        return;
+      }
+    }
     const w = world.toLocal({ x: e.offsetX, y: e.offsetY });
     // A finger never hovers: tapping a tile is how its info shows up.
     describe(...tileAt(e.offsetX, e.offsetY));
@@ -1337,6 +1391,18 @@ async function main() {
     panning = null;
   });
   app.canvas.addEventListener("pointermove", (e) => {
+    if (e.pointerType === "touch" && touches.has(e.pointerId)) {
+      touches.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+      if (pinch) {
+        if (touches.size >= 2) {
+          const { mx, my, distance } = fingerSpread();
+          pinch.mx = mx;
+          pinch.my = my;
+          camera.pinchTo(pinch.scale * (distance / pinch.distance), mx, my, pinch.wx, pinch.wy);
+        }
+        return;
+      }
+    }
     const [x, y] = tileAt(e.offsetX, e.offsetY);
     describe(x, y);
     if (panning) {
