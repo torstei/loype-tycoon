@@ -298,3 +298,8 @@ label.auto-open input { vertical-align: -2px; margin-right: 4px; }
 #kiosk .experts { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; margin-top: 10px; padding: 10px;
   border: 2px dashed #8a5a30; border-radius: 8px; background: #fff3dc; }
 #kiosk .experts > div:last-child { white-space: nowrap; }
+#tool-menu .group { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #6a7884; padding: 4px 4px 0; }
+#tool-menu button small { float: right; margin-left: 12px; color: #6a7884; font-size: 12px; line-height: 1.6; }
+#tool-menu button.active small { color: #dbe6ff; }
+html:not(.compact) #tool-menu .not-build { display: none; }
+#build-choice.active { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
