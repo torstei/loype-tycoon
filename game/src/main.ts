@@ -4,7 +4,7 @@ import { dayLabel, GameClock, SPEEDS, weekday } from "./clock";
 import { Fleet, GARAGE_REACH } from "./groomer";
 import { areas, Report, writeReport } from "./report";
 import { Kiosk, KIOSK_TIERS } from "./kiosk";
-import { touchOnly, waitForTouchChoice } from "./mobile";
+import { showTouchTips, touchOnly } from "./mobile";
 import { showStartupError, watchForStaleBuild } from "./startup";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
 import {
@@ -91,7 +91,6 @@ const CONNECT_REACH = 3;
 const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
 
 async function main() {
-  await waitForTouchChoice();
   const updateCompact = () => document.documentElement.classList.toggle("compact", touchOnly() || innerWidth < COMPACT_BELOW);
   document.documentElement.classList.toggle("touch", touchOnly());
   /** The tool to fall back to: on a touchscreen one finger already pans, so looking around needs no tool of its own. */
@@ -131,6 +130,7 @@ async function main() {
   const chunks = new LandscapeChunks(map);
   const detail = chunks.layer;
   document.getElementById("loading")?.remove();
+  showTouchTips();
   const mapW = map.width * PX;
   const mapH = map.height * PX;
   const frame = new Graphics()
