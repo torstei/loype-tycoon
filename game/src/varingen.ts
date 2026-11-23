@@ -19,6 +19,12 @@ export interface DayNews {
   snow: number;
   rain: number;
   tiles: number;
+  /** Absent in days logged before waffle stands existed. */
+  waffles?: number;
+  kioskBought?: string | null;
+  kioskUpgrade?: boolean;
+  kioskBroken?: boolean;
+  kiosks?: number;
   icy: number;
   bare: number;
 }
@@ -229,6 +235,67 @@ function stories(input: EditionInput): Story[] {
         `– Elgen synes nok det er like deilig å gå i preparert spor som oss, sier en lokal elgjeger. – Den gir bare ikke Vipps.`,
         "Elgen skyr folk. Jo flere som går i sporet, desto sjeldnere tråkker den der.",
       ],
+    });
+  }
+
+  const waffles = sum(week, (d) => d.waffles ?? 0);
+  const bought = week.map((d) => d.kioskBought).filter((b): b is string => !!b);
+  const hasKiosk = (last?.kiosks ?? 0) > 0;
+  if (bought.includes("Vaffel-O-Matic 3000")) {
+    out.push({
+      score: 6,
+      tone: 0,
+      kicker: "Investering",
+      headline: "Løypelaget kjøpte vaffelmaskin til 220 000 kroner",
+      lead: "Den heter Vaffel-O-Matic 3000, har røresilo, transportbånd og LED-skilt, og kan lage 2 000 vafler om dagen.",
+      body: [
+        `– Hvem skal spise alle de vaflene? spør ${person(seed + 23, NORTH)}, som bor rett ved garasjen og nå har lys i soverommet til klokka ti om kvelden.`,
+        "Løypelaget mener investeringen vil betale seg «i løpet av noen sesonger, avhengig av brunostprisen».",
+      ],
+    });
+  } else if (bought.length > 0) {
+    const upgraded = week.some((d) => d.kioskBought && d.kioskUpgrade);
+    out.push({
+      score: 3,
+      tone: 1,
+      kicker: "Nytt i løypa",
+      headline: upgraded ? "Vaffelsalget ved garasjen blir større" : "Nå får du vafler ved løypelagets garasje",
+      lead: upgraded
+        ? `Løypelaget har oppgradert til «${bought.at(-1)}». – Det var kø ved luka hver lørdag, forklarer løypelaget.`
+        : `Løypelaget har satt opp «${bought.at(-1)}». Duften når helt ned til parkeringen.`,
+      body: [],
+    });
+  }
+  if (waffles >= 200) {
+    out.push({
+      score: 4 + Math.min(3, waffles / 500),
+      tone: 1,
+      kicker: "Vaffelfeber",
+      headline: `${waffles.toLocaleString("nb-NO")} vafler solgt på én uke`,
+      lead: "Vaffeljernet ved garasjen har gått varmt. Mange tar en ekstra runde bare for å komme forbi en gang til.",
+      body: [`– Jeg kom for sporet. Jeg ble for vaflene, sier ${person(seed + 25, SOUTH)}.`],
+    });
+  }
+  if (week.some((d) => d.kioskBroken)) {
+    out.push({
+      score: 3,
+      tone: 0,
+      kicker: "Teknisk",
+      headline: "Vaffel-O-Matic i ustand – igjen",
+      lead: "Røren stivnet i dysene, og skiløperne måtte klare seg med kvikklunsj.",
+      body: [],
+    });
+  }
+  if (skiers >= 300) {
+    out.push({
+      score: 2,
+      tone: 0,
+      kicker: "Handel",
+      headline: "7-Eleven i Hakadal: «Rekordsalg av vaffel og boller!»",
+      lead: hasKiosk
+        ? "Butikken merker skiløperne. – Løypelagets vaffelbu? Vi merker ingenting, sier butikksjefen, og legger enda flere boller i disken."
+        : "Butikken takker skiløperne for en travel uke. – Folk kommer rett fra sporet og vil ha noe varmt, sier butikksjefen.",
+      body: [],
     });
   }
 

@@ -50,6 +50,8 @@ export interface SaveGame {
   schedule: "night" | "always";
   reports: SavedReport[];
   crew: GridTile;
+  /** Absent in saves from before waffle stands existed. */
+  kiosks?: { tile: GridTile; tier: number; soldToday: number; broken: boolean }[];
   /** Absent in saves from before the paper existed. */
   varingen?: {
     editions: Edition[];
