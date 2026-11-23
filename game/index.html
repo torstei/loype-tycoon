@@ -33,6 +33,7 @@
     <div id="topbar">
       <div id="hud"></div>
       <div id="tools">
+        <button class="compact-only" id="bar-hide" title="Skjul verktøylinja">▾</button>
         <button data-tool="look" title="1">👀 <span class="label">Se</span></button>
         <button data-tool="build" title="2">⛷ <span class="label">Bygg løype</span></button>
         <button data-tool="remove" title="3">✖ <span class="label">Fjern</span></button>
@@ -59,7 +60,8 @@
     <div id="forecast"></div>
     <div id="fleet" hidden></div>
     <div id="toast" hidden></div>
-    <button id="paused" hidden>⏸ Pause — trykk mellomrom eller klikk her for å fortsette</button>
+    <button id="paused" hidden>⏸ Pause — <span class="wide-only">trykk mellomrom eller klikk her</span><span class="compact-only">trykk her</span> for å fortsette</button>
+    <button id="bar-show" class="compact-only" title="Vis verktøylinja">🛠 ▴</button>
     <div id="report" hidden></div>
     <div id="paper" hidden></div>
     <div id="crossing" hidden></div>

@@ -216,7 +216,18 @@ html.compact #hud > span { margin-left: 0; }
 html.compact #hud .title { display: none; }
 html.compact #tools { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; justify-content: center; gap: 4px;
   padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: rgba(255, 255, 255, 0.94); border-top: 2px solid #1f5fd1; }
-html.compact #tools { gap: 3px; }
+html.compact #tools { gap: 3px; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none;
+  transition: transform 0.25s ease; }
+html.compact #tools::-webkit-scrollbar { display: none; }
+html.compact #tools button { flex: none; }
+html.compact.bar-hidden #tools { transform: translateY(110%); }
+html.compact.bar-hidden #fleet { display: none; }
+html.compact.bar-hidden #toast { bottom: calc(64px + env(safe-area-inset-bottom)); }
+#bar-show { position: fixed; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 7; font: inherit;
+  font-size: 15px; font-weight: 700; padding: 8px 12px; border: 2px solid #1f5fd1; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96); color: #1f5fd1; cursor: pointer; box-shadow: 0 4px 14px rgba(20, 35, 70, 0.3); }
+html.compact:not(.bar-hidden) #bar-show { display: none !important; }
+html.compact #tools #bar-hide { color: #1f5fd1; font-weight: 700; }
 html.compact #tools button { width: 42px; min-height: 40px; padding: 2px 0; font-size: 18px; }
 html.compact #tools .label { display: none; }
 html.compact #tools .speed { display: contents; }
