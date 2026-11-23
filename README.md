@@ -121,7 +121,10 @@ more than the tracks delivered, snow left ungroomed, ice and bare ground, record
 skiers, new track, moose in the tracks, an empty till. Good press nudges reputation up and
 brings more skiers for the next four days; bad press does the opposite. Below the fold: short
 news, a snow-depth comparison with Rotnes, the "Sør i bygda" column, Gjøvikbanen and a
-reader's letter.
+reader's letter. A new edition opens on screen by itself, as does each morning's føremelding; a box at
+the bottom of each turns that off, and they then announce themselves instead (Varingen with a
+"Les avisa" button, a dot on the button and a 🗞 badge on the tab for the hidden tool bar).
+On a phone 🗞 and 📰 sit right after the tool button, and only one of them is open at a time.
 
 ## Saving
 
