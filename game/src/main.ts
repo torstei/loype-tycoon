@@ -75,6 +75,9 @@ const PAN_KEYS: Record<string, [number, number]> = {
 const START_BUDGET = 150_000;
 /** Below this window width (or on a touch-only device) the tools move to a bar at the bottom. */
 const COMPACT_BELOW = 760;
+const BAR_HIDDEN = "loype-tycoon:bar-hidden";
+/** On a phone the tile info goes away by itself, since there is no pointer leaving to hide it. */
+const COMPACT_INFO_MS = 5000;
 /** How far from the network a drag may start and still be linked up automatically, in tiles. */
 const CONNECT_REACH = 3;
 const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
@@ -276,7 +279,8 @@ async function main() {
     const top = `${topbar.offsetHeight + 8}px`;
     const root = document.documentElement.style;
     root.setProperty("--top", top);
-    root.setProperty("--bar", `${document.documentElement.classList.contains("compact") ? toolbar.offsetHeight : 0}px`);
+    const html = document.documentElement.classList;
+    root.setProperty("--bar", `${html.contains("compact") && !html.contains("bar-hidden") ? toolbar.offsetHeight : 0}px`);
     root.setProperty("--fleet", `${fleetPanel.hidden ? 0 : fleetPanel.offsetHeight + 6}px`);
     root.setProperty("--paused", `${pausedBanner.hidden ? 0 : pausedBanner.offsetHeight + 8}px`);
     document.getElementById("forecast")!.style.top = top;
@@ -291,6 +295,22 @@ async function main() {
   new ResizeObserver(placePanels).observe(pausedBanner);
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-zoom]")) {
     button.addEventListener("click", () => camera.zoomAt(app.screen.width / 2, app.screen.height / 2, Number(button.dataset.zoom)));
+  }
+  const setBarHidden = (hidden: boolean) => {
+    document.documentElement.classList.toggle("bar-hidden", hidden);
+    try {
+      localStorage.setItem(BAR_HIDDEN, hidden ? "1" : "");
+    } catch {
+      // Not remembered between visits; no harm done.
+    }
+    placePanels();
+  };
+  document.getElementById("bar-hide")!.addEventListener("click", () => setBarHidden(true));
+  document.getElementById("bar-show")!.addEventListener("click", () => setBarHidden(false));
+  try {
+    setBarHidden(localStorage.getItem(BAR_HIDDEN) === "1");
+  } catch {
+    setBarHidden(false);
   }
   document.getElementById("forecast-button")!.addEventListener("click", () => {
     const open = document.getElementById("forecast")!.classList.toggle("open");
@@ -922,7 +942,12 @@ async function main() {
     return [Math.floor(p.x / PX), Math.floor(p.y / PX)];
   };
 
+  let infoTimer = 0;
   const describe = (x: number, y: number) => {
+    clearTimeout(infoTimer);
+    if (document.documentElement.classList.contains("compact")) {
+      infoTimer = window.setTimeout(() => (info.innerHTML = ""), COMPACT_INFO_MS);
+    }
     if (!map.inside(x, y)) {
       info.textContent = "";
       return;

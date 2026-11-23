@@ -177,8 +177,9 @@ computer, and lets anyone carry on anyway, warned that it will be painful, for t
 browser session.
 
 On a narrow window or a touch-only device the layout turns compact: a one-line status bar on
-top, the tools as icons in a bar at the bottom (with zoom and forecast buttons), panels across
-the full width, and tile info on tap instead of hover. Touch gestures beyond that (pinch zoom,
+top, the tools as a single scrolling row of icons at the bottom (with zoom and forecast
+buttons) that ▾ tucks away together with the snowcat panel and 🛠 brings back, panels across
+the full width, and tile info on tap instead of hover, fading after a few seconds. Touch gestures beyond that (pinch zoom,
 panning while building) are still to come.
 
 ## Deploying
