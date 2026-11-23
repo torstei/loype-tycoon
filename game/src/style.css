@@ -24,8 +24,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #help td { padding: 3px 0; }
 #help p { margin: 10px 0 0; color: #4b5a64; font-size: 13px; }
 #tools { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-#tools .speed { margin-left: 10px; display: inline-flex; gap: 2px; }
-#tools .speed button { padding: 4px 7px; }
+#speed-choice { margin-left: 10px; }
 #hud .clock { font-weight: 700; font-variant-numeric: tabular-nums; }
 #forecast { position: fixed; left: 12px; top: 64px; padding: 8px 10px; background: rgba(255, 255, 255, 0.92);
   border-radius: 8px; box-shadow: 0 3px 12px rgba(30, 50, 90, 0.18); max-width: 300px; }
@@ -226,9 +225,7 @@ html.compact:not(.bar-hidden) #bar-show { display: none !important; }
 html.compact #tools #bar-hide { color: #1f5fd1; font-weight: 700; }
 html.compact #tools button { width: 42px; min-height: 40px; padding: 2px 0; font-size: 18px; }
 html.compact #tools .label { display: none; }
-html.compact #tools .speed { display: contents; }
-html.compact #tools .speed button { padding: 2px 0; font-size: 14px; letter-spacing: -2px; }
-html.compact #tools [data-speed="1"], html.compact #tools [data-speed="3"] { display: none; }
+html.compact #tools #speed-choice { width: auto; padding: 2px 8px; margin-left: 0; font-size: 14px; white-space: nowrap; }
 html.compact #forecast { display: none; }
 html.compact #forecast.open { display: block; left: 8px; right: 8px; max-width: none; }
 html.compact #forecast .days { justify-content: space-around; }
@@ -254,12 +251,12 @@ html.compact #setup, html.compact #report, html.compact #paper, html.compact #fo
 html.compact #setup { width: calc(100vw - 16px); }
 html.compact #tools [data-tool] { display: none; }
 html.compact #tools #tool-menu-button { background: #1f5fd1; color: #fff; border-color: #1f5fd1; font-size: 16px; }
-#tool-menu { position: fixed; left: 8px; bottom: calc(var(--bar) + 6px); z-index: 9; display: flex; flex-direction: column; gap: 4px;
+.menu { position: fixed; left: 8px; bottom: calc(var(--bar) + 6px); z-index: 9; display: flex; flex-direction: column; gap: 4px;
   padding: 6px; background: #fff; border: 2px solid #1f5fd1; border-radius: 12px; box-shadow: 0 8px 24px rgba(20, 35, 70, 0.35); }
-#tool-menu[hidden] { display: none; }
-#tool-menu button { font: inherit; font-size: 16px; text-align: left; padding: 10px 14px; border: 1px solid #c8d4e2; border-radius: 8px;
+.menu[hidden] { display: none; }
+.menu button { font: inherit; font-size: 16px; text-align: left; padding: 10px 14px; border: 1px solid #c8d4e2; border-radius: 8px;
   background: #fff; cursor: pointer; min-width: 190px; }
-#tool-menu button.active { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
+.menu button.active { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
 #build-plan { position: fixed; left: 8px; right: 8px; bottom: calc(var(--bar) + var(--fleet, 0px) + 8px); z-index: 8;
   padding: 10px 12px; background: #fffdf6; border: 3px solid #2fa84f; border-radius: 12px; font-size: 14px; line-height: 1.4;
   box-shadow: 0 8px 24px rgba(20, 35, 70, 0.35); }
@@ -268,7 +265,7 @@ html.compact #tools #tool-menu-button { background: #1f5fd1; color: #fff; border
 #build-plan button { flex: 1; font: inherit; font-weight: 700; padding: 10px; border-radius: 10px; border: 2px solid #2fa84f;
   background: #fff; color: #1f6f36; cursor: pointer; }
 #build-plan button[data-plan="build"], #build-plan button[data-plan="place"] { background: #2fa84f; color: #fff; }
-html.touch #tool-menu [data-tool="look"] { display: none; }
+html.touch .menu [data-tool="look"] { display: none; }
 #toast button.read { font: inherit; font-weight: 700; margin-left: 6px; padding: 3px 10px; border-radius: 8px;
   border: 2px solid #23323d; background: #23323d; color: #fff; cursor: pointer; }
 /* On a phone the paper and the snow report come right after the tool button; zoom moves back now that pinching works. */
@@ -278,7 +275,7 @@ html.compact #tools #tool-menu-button { order: 1; }
 html.compact #tools #paper-button { order: 2; }
 html.compact #tools #report-button { order: 3; }
 html.compact #tools #undo { order: 4; }
-html.compact #tools .speed > * { order: 5; }
+html.compact #tools #speed-choice { order: 5; }
 html.compact #tools [data-zoom] { order: 20; }
 #bar-show { position: fixed; }
 #bar-show.unread::after { content: "🗞"; position: absolute; top: -12px; left: -12px; font-size: 14px; background: #e8591a;
@@ -298,8 +295,9 @@ label.auto-open input { vertical-align: -2px; margin-right: 4px; }
 #kiosk .experts { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; margin-top: 10px; padding: 10px;
   border: 2px dashed #8a5a30; border-radius: 8px; background: #fff3dc; }
 #kiosk .experts > div:last-child { white-space: nowrap; }
-#tool-menu .group { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #6a7884; padding: 4px 4px 0; }
-#tool-menu button small { float: right; margin-left: 12px; color: #6a7884; font-size: 12px; line-height: 1.6; }
-#tool-menu button.active small { color: #dbe6ff; }
-html:not(.compact) #tool-menu .not-build { display: none; }
-#build-choice.active { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
+.menu .group { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #6a7884; padding: 4px 4px 0; }
+.menu button small { float: right; margin-left: 12px; color: #6a7884; font-size: 12px; line-height: 1.6; }
+.menu button.active small { color: #dbe6ff; }
+#tool-choice.active, #speed-choice.active { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
+.dozer { width: 1.2em; height: 1.2em; vertical-align: -0.22em; }
+html.touch #speed-menu [data-speed="-1"] small { display: none; }

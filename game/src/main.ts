@@ -39,7 +39,6 @@ import "./style.css";
 
 type Tool = "look" | "build" | "remove" | "garage" | "koie" | "hytte";
 /** The things the build menu offers, in its order. */
-const BUILD_TOOLS: Tool[] = ["build", "garage", "koie", "hytte"];
 /** Which cabin level each cabin tool builds. */
 const CABIN_TOOL_TIER: Partial<Record<Tool, number>> = { koie: 1, hytte: 2 };
 
@@ -77,8 +76,18 @@ const PAN_KEYS: Record<string, [number, number]> = {
 };
 
 const START_BUDGET = 150_000;
-const TOOL_ICONS: Record<Tool, string> = { look: "👀", build: "⛷", remove: "✖", garage: "🏠", koie: "🛖", hytte: "🏡" };
-const TOOL_NAMES: Record<Tool, string> = { look: "Se", build: "Bygg løype", remove: "Fjern", garage: "Bygg garasje", koie: "Bygg dugnadskoie", hytte: "Bygg betjent hytte" };
+const BULLDOZER = `<svg class="dozer" viewBox="0 0 24 24" aria-hidden="true">
+  <rect x="7" y="15.5" width="15.5" height="6" rx="3" fill="#3b3b3b"/>
+  <circle cx="10" cy="18.5" r="1.4" fill="#a0a0a0"/><circle cx="19.5" cy="18.5" r="1.4" fill="#a0a0a0"/>
+  <rect x="8" y="10.5" width="13.5" height="5" rx="1" fill="#f2b705"/>
+  <rect x="13" y="4.5" width="7.5" height="6.5" rx="1" fill="#f2b705"/>
+  <rect x="14.5" y="6" width="4.5" height="3.2" fill="#cfe8ff"/>
+  <rect x="4.5" y="14" width="4" height="1.6" fill="#555"/>
+  <path d="M1.5 10 L5 12.5 V21.5 H1.5 Z" fill="#8a8a8a"/>
+</svg>`;
+const SPEED_ICONS = ["▶", "▶▶", "▶▶▶", "⏩", "⏩⏩"];
+const TOOL_ICONS: Record<Tool, string> = { look: "👀", build: "⛷", remove: BULLDOZER, garage: "🏠", koie: "🛖", hytte: "🏡" };
+const TOOL_NAMES: Record<Tool, string> = { look: "Se deg rundt", build: "Bygg løype", remove: "Riv løype", garage: "Bygg garasje", koie: "Bygg dugnadskoie", hytte: "Bygg betjent hytte" };
 /** Below this window width (or on a touch-only device) the tools move to a bar at the bottom. */
 const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
@@ -336,20 +345,37 @@ async function main() {
   const pausedBanner = document.getElementById("paused")!;
   const toolMenu = document.getElementById("tool-menu")!;
   const toolMenuButton = document.getElementById("tool-menu-button")!;
-  const buildChoice = document.getElementById("build-choice")!;
-  let lastBuildTool: Tool = "build";
-  /** Open the tool menu: above the bar on a phone, below the build button on a wide screen. */
-  const openToolMenu = (anchor: HTMLElement) => {
-    toolMenu.hidden = !toolMenu.hidden;
+  const toolChoice = document.getElementById("tool-choice")!;
+  for (const el of document.querySelectorAll<HTMLElement>("[data-icon]")) {
+    el.innerHTML = TOOL_ICONS[el.dataset.icon as Tool];
+  }
+  const speedMenu = document.getElementById("speed-menu")!;
+  const speedChoice = document.getElementById("speed-choice")!;
+  const menus = [toolMenu, speedMenu];
+  /** Close any open dropdown; true if one was open. */
+  const closeMenus = (): boolean => {
+    const open = menus.some((m) => !m.hidden);
+    for (const m of menus) {
+      m.hidden = true;
+    }
+    return open;
+  };
+  /** Open a dropdown at its button: above the bar on a phone, below the button on a wide screen. */
+  const openMenu = (menu: HTMLElement, anchor: HTMLElement) => {
+    const wasOpen = !menu.hidden;
+    closeMenus();
+    if (wasOpen) {
+      return;
+    }
+    menu.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
     if (document.documentElement.classList.contains("compact")) {
-      toolMenu.style.removeProperty("top");
-      toolMenu.style.removeProperty("left");
-      toolMenu.style.removeProperty("bottom");
+      menu.style.removeProperty("top");
+      menu.style.removeProperty("bottom");
     } else {
-      const r = anchor.getBoundingClientRect();
-      toolMenu.style.left = `${r.left}px`;
-      toolMenu.style.top = `${r.bottom + 4}px`;
-      toolMenu.style.bottom = "auto";
+      menu.style.top = `${r.bottom + 4}px`;
+      menu.style.bottom = "auto";
     }
   };
   const barShow = document.getElementById("bar-show")!;
@@ -385,8 +411,9 @@ async function main() {
     placePanels();
   };
   document.getElementById("bar-hide")!.addEventListener("click", () => setBarHidden(true));
-  toolMenuButton.addEventListener("click", () => openToolMenu(toolMenuButton));
-  buildChoice.addEventListener("click", () => openToolMenu(buildChoice));
+  toolMenuButton.addEventListener("click", () => openMenu(toolMenu, toolMenuButton));
+  toolChoice.addEventListener("click", () => openMenu(toolMenu, toolChoice));
+  speedChoice.addEventListener("click", () => openMenu(speedMenu, speedChoice));
   document.getElementById("undo")!.addEventListener("click", () => undoLastStroke());
   document.getElementById("bar-show")!.addEventListener("click", () => setBarHidden(false));
   try {
@@ -420,22 +447,24 @@ async function main() {
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-tool]")) {
       btn.classList.toggle("active", btn.dataset.tool === tool);
     }
-    toolMenuButton.textContent = `${TOOL_ICONS[tool]}▴`;
-    if (BUILD_TOOLS.includes(tool)) {
-      lastBuildTool = tool;
-    }
-    buildChoice.textContent = `${TOOL_ICONS[lastBuildTool]} ${TOOL_NAMES[lastBuildTool]} ▾`;
-    buildChoice.classList.toggle("active", BUILD_TOOLS.includes(tool));
+    toolMenuButton.innerHTML = `${TOOL_ICONS[tool]}▴`;
+    toolChoice.innerHTML = `${TOOL_ICONS[tool]} ${TOOL_NAMES[tool]} ▾`;
+    toolChoice.classList.toggle("active", tool !== "look");
     for (const el of toolMenu.querySelectorAll<HTMLElement>("[data-price]")) {
       const which = el.dataset.price;
       const price = which === "garage" ? fleet.nextGarageCost : CABIN_TIERS[which === "koie" ? 1 : 2].price;
       el.textContent = price === 0 ? "gratis" : kr(price);
     }
-    barShow.textContent = `${TOOL_ICONS[tool]} ▴`;
+    barShow.innerHTML = `${TOOL_ICONS[tool]} ▴`;
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-speed]")) {
       const i = Number(btn.dataset.speed);
       btn.classList.toggle("active", i < 0 ? clock.paused : !clock.paused && clock.speedIndex === i);
     }
+    const compactBar = document.documentElement.classList.contains("compact");
+    speedChoice.textContent = clock.paused
+      ? `⏸${compactBar ? "" : " Pause"} ${compactBar ? "▴" : "▾"}`
+      : `${compactBar ? "" : `${SPEED_ICONS[clock.speedIndex]} `}${SPEEDS[clock.speedIndex]}× ${compactBar ? "▴" : "▾"}`;
+    speedChoice.classList.toggle("active", clock.paused);
     pausedBanner.hidden = !clock.paused || !timeStarted || asking || clock.seasonOver;
     const garageTool = document.querySelector<HTMLButtonElement>('[data-tool="garage"]')!;
     garageTool.title = `4 · ${fleet.nextGarageCost === 0 ? "gratis" : kr(fleet.nextGarageCost)}`;
@@ -1982,8 +2011,7 @@ async function main() {
   app.canvas.addEventListener("touchend", (e) => e.preventDefault(), { passive: false });
 
   app.canvas.addEventListener("pointerdown", (e) => {
-    if (!toolMenu.hidden) {
-      toolMenu.hidden = true;
+    if (closeMenus()) {
       return;
     }
     if (e.pointerType === "touch") {
@@ -2204,7 +2232,11 @@ async function main() {
     refreshHud();
   };
   for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-speed]")) {
-    btn.addEventListener("click", () => setSpeed(Number(btn.dataset.speed)));
+    btn.addEventListener("click", () => {
+      closeMenus();
+      const i = Number(btn.dataset.speed);
+      setSpeed(i < 0 && clock.paused ? clock.speedIndex : i);
+    });
   }
   snowButton.classList.add("active");
   snowButton.addEventListener("click", toggleSnow);
@@ -2271,7 +2303,7 @@ async function main() {
       showReport(false);
       showPaper(false);
       kioskPanel.hidden = true;
-      toolMenu.hidden = true;
+      closeMenus();
       clearPlan();
     } else {
       const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage", Digit5: "koie", Digit6: "hytte" } as Record<string, Tool>)[e.code];
