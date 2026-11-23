@@ -35,33 +35,61 @@ const CONTOUR_M = 20;
 /** Terrain painted over the forest floor, in the same order mapgen paints it. */
 export const PAINT_ORDER = [Terrain.Open, Terrain.Farmland, Terrain.Built, Terrain.Rock, Terrain.Bog, Terrain.Water];
 
-export function renderLandscape(map: GameMap): HTMLCanvasElement {
-  const W = map.width * PX;
-  const H = map.height * PX;
+/** A rectangle of tiles. */
+export interface TileRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Per-tile fields the landscape drawing samples between tile centres; computed once per map. */
+export interface LandscapeFields {
+  shade: Float32Array;
+  elev: Float32Array;
+}
+
+export function landscapeFields(map: GameMap): LandscapeFields {
+  return {
+    shade: tileField(map, (x, y) => lightAt(map, x, y)),
+    elev: tileField(map, (x, y) => map.elevationAt(x, y)),
+  };
+}
+
+/**
+ * Draw the winter landscape for a rectangle of tiles. Everything random is keyed to global
+ * pixel and tile positions, so neighbouring rectangles meet without seams.
+ */
+export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeFields): HTMLCanvasElement {
+  const W = rect.w * PX;
+  const H = rect.h * PX;
+  const ox = rect.x * PX;
+  const oy = rect.y * PX;
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
 
-  const cls = smoothTerrain(map, ctx, W, H, PX);
-  const shade = tileField(map, (x, y) => lightAt(map, x, y));
-  const elev = tileField(map, (x, y) => map.elevationAt(x, y));
+  const cls = smoothTerrain(map, ctx, rect, PX);
+  const { shade, elev } = fields;
 
   const img = ctx.createImageData(W, H);
   const d = img.data;
   const band = new Int16Array(W * H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      band[y * W + x] = Math.floor(sample(map, elev, x, y) / CONTOUR_M);
+      band[y * W + x] = Math.floor(sample(map, elev, ox + x, oy + y) / CONTOUR_M);
     }
   }
 
   const edge = (i: number, t: number, r: number) =>
     cls[i - r] !== t || cls[i + r] !== t || cls[i - r * W] !== t || cls[i + r * W] !== t;
 
-  for (let y = 1; y < H - 1; y++) {
-    for (let x = 1; x < W - 1; x++) {
-      const i = y * W + x;
+  for (let ly = 1; ly < H - 1; ly++) {
+    for (let lx = 1; lx < W - 1; lx++) {
+      const i = ly * W + lx;
+      const x = ox + lx;
+      const y = oy + ly;
       const t = cls[i];
       const s = sample(map, shade, x, y);
       let c = snow(s);
@@ -108,28 +136,35 @@ export function renderLandscape(map: GameMap): HTMLCanvasElement {
   }
   ctx.putImageData(img, 0, 0);
 
-  drawLines(map, ctx, LINE_STYLES, PX);
-  drawSprites(map, ctx, cls, W);
+  ctx.save();
+  ctx.translate(-ox, -oy);
+  drawLines(map, ctx, LINE_STYLES, PX, rect);
+  drawSprites(map, ctx, cls, rect);
+  ctx.restore();
   return canvas;
 }
 
 /**
- * Per-pixel terrain class. Each class's tile mask is blurred and thresholded so lakes and
- * fields come out as rounded blobs instead of 25 m squares.
+ * Per-pixel terrain class for a rectangle of tiles. Each class's tile mask is blurred and
+ * thresholded so lakes and fields come out as rounded blobs instead of 25 m squares.
  */
-export function smoothTerrain(map: GameMap, ctx: CanvasRenderingContext2D, W: number, H: number, px: number): Uint8Array {
+export function smoothTerrain(map: GameMap, ctx: CanvasRenderingContext2D, rect: TileRect, px: number, blur = px * 0.35): Uint8Array {
+  const W = Math.round(rect.w * px);
+  const H = Math.round(rect.h * px);
   const cls = new Uint8Array(W * H).fill(Terrain.Forest);
   const small = document.createElement("canvas");
-  small.width = map.width;
-  small.height = map.height;
+  small.width = rect.w;
+  small.height = rect.h;
   const sctx = small.getContext("2d")!;
   for (const t of PAINT_ORDER) {
-    const mask = sctx.createImageData(map.width, map.height);
+    const mask = sctx.createImageData(rect.w, rect.h);
     let any = false;
-    for (let i = 0; i < map.terrain.length; i++) {
-      if (map.terrain[i] === t) {
-        mask.data[i * 4 + 3] = 255;
-        any = true;
+    for (let y = 0; y < rect.h; y++) {
+      for (let x = 0; x < rect.w; x++) {
+        if (map.terrain[map.index(rect.x + x, rect.y + y)] === t) {
+          mask.data[(y * rect.w + x) * 4 + 3] = 255;
+          any = true;
+        }
       }
     }
     if (!any) {
@@ -138,7 +173,7 @@ export function smoothTerrain(map: GameMap, ctx: CanvasRenderingContext2D, W: nu
     sctx.putImageData(mask, 0, 0);
     ctx.clearRect(0, 0, W, H);
     ctx.imageSmoothingEnabled = true;
-    ctx.filter = `blur(${px * 0.35}px)`;
+    ctx.filter = `blur(${blur}px)`;
     ctx.drawImage(small, 0, 0, W, H);
     ctx.filter = "none";
     const alpha = ctx.getImageData(0, 0, W, H).data;
@@ -150,6 +185,32 @@ export function smoothTerrain(map: GameMap, ctx: CanvasRenderingContext2D, W: nu
   }
   ctx.clearRect(0, 0, W, H);
   return cls;
+}
+
+/** Chunk edge in tiles, and the overlap drawn around each so blurs, shadows and trees cross seams. */
+export const CHUNK = 50;
+const CHUNK_MARGIN = 2;
+
+/** Draw one chunk of the detailed landscape: a CHUNK×CHUNK block of tiles (smaller at the map edge). */
+export function renderChunk(map: GameMap, cx: number, cy: number, fields: LandscapeFields): HTMLCanvasElement {
+  const x0 = cx * CHUNK;
+  const y0 = cy * CHUNK;
+  const w = Math.min(CHUNK, map.width - x0);
+  const h = Math.min(CHUNK, map.height - y0);
+  const rx = Math.max(0, x0 - CHUNK_MARGIN);
+  const ry = Math.max(0, y0 - CHUNK_MARGIN);
+  const rect = {
+    x: rx,
+    y: ry,
+    w: Math.min(map.width, x0 + w + CHUNK_MARGIN) - rx,
+    h: Math.min(map.height, y0 + h + CHUNK_MARGIN) - ry,
+  };
+  const region = renderLandscape(map, rect, fields);
+  const out = document.createElement("canvas");
+  out.width = w * PX;
+  out.height = h * PX;
+  out.getContext("2d")!.drawImage(region, (rx - x0) * PX, (ry - y0) * PX);
+  return out;
 }
 
 export function lightAt(map: GameMap, x: number, y: number): number {
@@ -214,11 +275,35 @@ export const LINE_STYLES: [MapLine["kind"], Stroke[]][] = [
   ]],
 ];
 
-export function drawLines(map: GameMap, ctx: CanvasRenderingContext2D, styles: [MapLine["kind"], Stroke[]][], px: number) {
+const lineBoxes = new WeakMap<MapLine, TileRect>();
+
+/** A line's bounding box in tiles, padded by a tile for stroke width. */
+function lineBox(l: MapLine): TileRect {
+  let box = lineBoxes.get(l);
+  if (!box) {
+    const xs = l.pts.map((p) => p[0]);
+    const ys = l.pts.map((p) => p[1]);
+    const x = Math.min(...xs) - 1;
+    const y = Math.min(...ys) - 1;
+    box = { x, y, w: Math.max(...xs) + 1 - x, h: Math.max(...ys) + 1 - y };
+    lineBoxes.set(l, box);
+  }
+  return box;
+}
+
+const overlaps = (a: TileRect, b: TileRect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+export function drawLines(
+  map: GameMap,
+  ctx: CanvasRenderingContext2D,
+  styles: [MapLine["kind"], Stroke[]][],
+  px: number,
+  within?: TileRect,
+) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   for (const [kind, strokes] of styles) {
-    const lines = map.lines.filter((l) => l.kind === kind);
+    const lines = map.lines.filter((l) => l.kind === kind && (!within || overlaps(lineBox(l), within)));
     for (const s of strokes) {
       ctx.strokeStyle = s.colour;
       ctx.lineWidth = s.width;
@@ -342,10 +427,13 @@ export function housePosition(tx: number, ty: number): { x: number; y: number } 
 const HOUSES = ["#b8433a", "#b8433a", "#c9a045", "#eef0f0", "#8a3b34"].map(house);
 const NO_TREES = Flag.Road | Flag.Rail | Flag.Building | Flag.ForestRoad;
 
-function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array, W: number) {
+/** Trees, houses, boulders and tufts for a rectangle, drawn in global pixel coordinates. */
+function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array, rect: TileRect) {
+  const W = rect.w * PX;
+  const H = rect.h * PX;
   const items: { x: number; y: number; img: HTMLCanvasElement; shadow: number }[] = [];
-  for (let ty = 0; ty < map.height; ty++) {
-    for (let tx = 0; tx < map.width; tx++) {
+  for (let ty = rect.y; ty < rect.y + rect.h; ty++) {
+    for (let tx = rect.x; tx < rect.x + rect.w; tx++) {
       const flags = map.flags[map.index(tx, ty)];
       const t = map.terrainAt(tx, ty);
       if (flags & Flag.Building && !(flags & Flag.Road)) {
@@ -358,7 +446,9 @@ function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Arra
         for (let k = 0; k < count; k++) {
           const x = tx * PX + 2 + hash(tx, ty, 10 + k) * 12;
           const y = ty * PX + 3 + hash(tx, ty, 20 + k) * 13;
-          if (cls[(y | 0) * W + (x | 0)] !== Terrain.Forest) {
+          const lx = (x | 0) - rect.x * PX;
+          const ly = (y | 0) - rect.y * PX;
+          if (lx < 0 || ly < 0 || lx >= W || ly >= H || cls[ly * W + lx] !== Terrain.Forest) {
             continue;
           }
           const img = TREES[Math.floor(hash(tx, ty, 30 + k) * TREES.length)];
@@ -375,7 +465,8 @@ function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Arra
       }
     }
   }
-  items.sort((a, b) => a.y - b.y);
+  // Order by position alone, so overlapping sprites stack the same way in every chunk.
+  items.sort((a, b) => a.y - b.y || a.x - b.x);
   ctx.fillStyle = "rgba(60, 84, 140, 0.22)";
   for (const it of items) {
     if (it.shadow > 0) {

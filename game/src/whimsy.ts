@@ -525,7 +525,9 @@ export class Whimsy {
         }
       }
     }
-    for (let i = 0; i < 9 && wilds.length; i++) {
+    // About nine moose per 5×5 km.
+    const herd = Math.max(3, Math.round((map.width * map.height * 9) / 40_000));
+    for (let i = 0; i < herd && wilds.length; i++) {
       const [tx, ty] = wilds[Math.floor(hash(i, 7, 92) * wilds.length)];
       this.moose.push(new Moose(map, this.remote, (tx + 0.5) * PX, (ty + 0.5) * PX));
     }

@@ -40,7 +40,8 @@ export function renderOverview(map: GameMap): HTMLCanvasElement {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-  const cls = smoothTerrain(map, ctx, W, H, px * 1.6);
+  // A softer blur than the detail view: the overview wants rounded blobs, not field edges.
+  const cls = smoothTerrain(map, ctx, { x: 0, y: 0, w: map.width, h: map.height }, px, px * 1.6 * 0.35);
   const shade = tileField(map, (x, y) => lightAt(map, x, y));
 
   const img = ctx.createImageData(W, H);

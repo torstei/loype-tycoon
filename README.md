@@ -12,6 +12,11 @@ Real places, invented organisations.
 - `tools/mapgen/` — turns OpenStreetMap and Kartverket elevation data into a tile map.
 - `game/public/maps/` — generated maps (committed, so the game runs without the Python tooling).
 
+The Hakadal map covers 10×10 km. The detailed landscape is drawn in chunks of 50×50 tiles as
+they come into view, and the least recently seen are dropped again, so a large map neither
+takes long to load nor holds the whole landscape in memory; the overview map stands in until
+a chunk is ready.
+
 ## Running the game
 
 ```sh

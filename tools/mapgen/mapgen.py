@@ -80,7 +80,7 @@ class Region:
 
 
 REGIONS = {
-    "hakadal": Region("hakadal", "Hakadal", col=10616, row=266716, cols=200, rows=200),
+    "hakadal": Region("hakadal", "Hakadal", col=10516, row=266616, cols=400, rows=400),
 }
 
 # Terrain ids are shared with the game (game/src/terrain.ts); keep the two in sync.

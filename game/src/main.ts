@@ -24,7 +24,8 @@ import { Crowd, DayStats } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
-import { PX, renderLandscape } from "./render";
+import { landscapeFields, PX, renderChunk, renderLandscape } from "./render";
+import { LandscapeChunks } from "./chunks";
 import { Flag, FLAG_NAMES, TERRAIN_NAMES } from "./terrain";
 import { askCrossing } from "./crossing";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, roadTraffic, TrackNetwork } from "./tracks";
@@ -98,7 +99,8 @@ async function main() {
   await new Promise((r) => requestAnimationFrame(r));
   const overview = new Sprite(Texture.from(renderOverview(map)));
   overview.scale.set(PX / OVERVIEW_PX);
-  const detail = new Sprite(Texture.from(renderLandscape(map)));
+  const chunks = new LandscapeChunks(map);
+  const detail = chunks.layer;
   document.getElementById("loading")?.remove();
   const mapW = map.width * PX;
   const mapH = map.height * PX;
@@ -147,7 +149,7 @@ async function main() {
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, reports: () => reports } });
+    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -214,6 +216,9 @@ async function main() {
     }
     const tl = world.toLocal({ x: 0, y: 0 });
     const br = world.toLocal({ x: app.screen.width, y: app.screen.height });
+    if (detail.visible) {
+      chunks.update(tl.x, tl.y, br.x, br.y);
+    }
     whimsy.update(dt, { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y });
     crew.update(dt);
     const kind = weather.precipRate <= 0 ? "none" : weather.temperature < 0.8 ? "snow" : "rain";
