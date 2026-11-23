@@ -7,6 +7,9 @@ import { DayPlan } from "./weather";
 export const SAVE_FORMAT = "loype-tycoon-save";
 export const SAVE_VERSION = 1;
 
+/** One finished day's numbers. */
+export type AccountRow = { day: number; skiers: number; happy: number | null; donations: number; members: number; waffles: number; waffleIncome: number; diesel: number; power: number; guests: number; rooms: number; budget: number; reputation: number; tiles: number; built: number };
+
 export type Slot = "auto" | "1" | "2" | "3";
 export const SLOTS: Slot[] = ["auto", "1", "2", "3"];
 
@@ -52,6 +55,8 @@ export interface SaveGame {
   crew: GridTile;
   /** Absent in saves from before waffle stands existed. */
   kiosks?: { tile: GridTile; tier: number; soldToday: number; broken: boolean; experts?: boolean; kind?: "stand" | "cabin"; name?: string | null }[];
+  /** Absent in saves from before the account existed. */
+  accounts?: { history: AccountRow[]; dayStartBudget: number };
   /** Absent in saves from before the paper existed. */
   varingen?: {
     editions: Edition[];

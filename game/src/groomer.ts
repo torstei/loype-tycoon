@@ -6,7 +6,7 @@ import { Weather } from "./weather";
 
 /** Tiles per game hour: 10 km/h, about what a real snowcat manages. */
 const SPEED = 40;
-const COST_PER_TILE = 10;
+export const COST_PER_TILE = 10;
 const MAX_SHIFT_HOURS = 10;
 const MIN_JOB_TILES = 4;
 

@@ -233,7 +233,7 @@ export class TrackNetwork {
       return null;
     }
     const road = this.passageOnRoad(x, y) ? roadTraffic(this.traffic(x, y)).levelPrice : 0;
-    return Math.round(base * (1 + Math.min(slope, MAX_SLOPE) / 8)) + road;
+    return Math.round(base * (1 + Math.min(slope, MAX_SLOPE) / 16)) + road;
   }
 
   /** Why track cannot be built here, in words for the player; null where cost() allows it. */

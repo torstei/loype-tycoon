@@ -107,6 +107,18 @@ swings, snow and rain, and a snowpack that is deeper higher up. Each track tile 
 how fresh it is, how much new snow lies in it and how icy it is; tracks are drawn by
 condition, from crisp blue corduroy to worn, snowed-in, icy or bare.
 
+## Money
+
+The club starts with 150 000 kr. Track costs by ground (forest 250 kr a tile, open land 80, rock
+600) with a surcharge for slope, so a first 3 km loop costs about 60 000 kr. Income is Vipps
+donations (more from happier skiers), memberships, waffles and cabin rooms; the running costs are
+diesel (10 kr per tile groomed, 400 kr per km) and the cabins' and stands' bills. More skiers come
+from reaching new stations, car parks and housing areas; longer and better track makes them happier.
+
+📒 Regnskap (click the cash in the top bar, press `K`, or from 💾 Spill) shows income and costs
+for today, the last seven days and the season, with what was spent on building. On a phone the
+track plan says whether the new track reaches a new place and what it adds to each night's diesel.
+
 ## Waffles
 
 Each garage can get a waffle stand, bought and upgraded from the 🧇 button in the snowcat

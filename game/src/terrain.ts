@@ -47,11 +47,11 @@ export const FLAG_NAMES: [Flag, string][] = [
 
 /** Kroner per tile of new track, before slope. Null means you cannot build here. */
 export const BUILD_COST: Record<Terrain, number | null> = {
-  [Terrain.Forest]: 400,
-  [Terrain.Open]: 120,
-  [Terrain.Farmland]: 150,
-  [Terrain.Bog]: 80,
-  [Terrain.Water]: 60,
+  [Terrain.Forest]: 250,
+  [Terrain.Open]: 80,
+  [Terrain.Farmland]: 100,
+  [Terrain.Bog]: 60,
+  [Terrain.Water]: 40,
   [Terrain.Built]: null,
-  [Terrain.Rock]: 900,
+  [Terrain.Rock]: 600,
 };
