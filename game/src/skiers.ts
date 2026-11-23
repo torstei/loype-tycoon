@@ -680,10 +680,10 @@ export class Crowd {
           continue;
         }
         s.passedKiosks.add(k);
-        if (!k.hasWaffles() || Math.random() > k.spec.appeal * coldAppetite(weather.temperature)) {
+        if (!k.hasWaffles(clock.day) || Math.random() > k.appealOn(clock.day) * coldAppetite(weather.temperature)) {
           continue;
         }
-        const net = k.spec.salePrice - k.spec.ingredients;
+        const net = k.salePriceOn(clock.day) - k.spec.ingredients;
         k.soldToday++;
         this.today.waffles++;
         this.today.waffleIncome += net;

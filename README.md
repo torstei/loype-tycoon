@@ -113,6 +113,11 @@ difference. Skiers passing close to an open stand may stop for one, more often w
 cold, up to what the stand can make in a day; each stand also draws a few more skiers to the
 area. Sales show in the day's summary and in Varingen.
 
+From the booth up, each stand can sign an agreement with Nittedal Skytterlag (15 000 kr):
+their waffle experts staff it every Saturday and Sunday, making half as many waffles again,
+drawing more people to stop and charging 5 kr more for them. In season runs it pays for
+itself in about seven weeks at a booth and three and a half at a kiosk.
+
 ## Varingen
 
 The local paper comes out every Thursday morning (`V`). Its front page is the week's biggest

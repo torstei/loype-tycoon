@@ -3,7 +3,7 @@ import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, GameClock, SPEEDS, weekday } from "./clock";
 import { Fleet, GARAGE_REACH } from "./groomer";
 import { areas, Report, writeReport } from "./report";
-import { Kiosk, KIOSK_TIERS } from "./kiosk";
+import { EXPERTS, Kiosk, KIOSK_TIERS } from "./kiosk";
 import { showTouchTips, touchOnly } from "./mobile";
 import { showStartupError, watchForStaleBuild } from "./startup";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
@@ -466,6 +466,7 @@ async function main() {
   let kioskBoughtToday: string | null = null;
   let kioskUpgradedToday = false;
   let kioskBrokenToday = false;
+  let expertsHiredToday = false;
 
   const placeKiosk = (x: number, y: number, tier: number): Kiosk => {
     const existing = kioskAt(x, y);
@@ -497,7 +498,7 @@ async function main() {
       ? "Ingen vaffelsalg her ennå. Vafler gir inntekt, og folk tar gjerne en tur dit det lukter vaffel."
       : current.broken
         ? `${current.spec.name} er i ustand i dag. Teknikeren kommer i morgen.`
-        : `I dag: ${current.soldToday} av ${current.spec.capacity} vafler solgt · ${current.isOpen(clock.day, clock.hourOfDay) ? "åpent nå" : `åpent ${current.spec.open[0]}–${current.spec.open[1]}${current.spec.weekendsOnly ? " i helgene" : ""}`}`;
+        : `I dag: ${current.soldToday} av ${current.capacityOn(clock.day)} vafler solgt · ${current.isOpen(clock.day, clock.hourOfDay) ? "åpent nå" : `åpent ${current.spec.open[0]}–${current.spec.open[1]}${current.spec.weekendsOnly ? " i helgene" : ""}`}${current.expertsOn(clock.day) ? " · 🎯 skytterlaget steiker" : ""}`;
     const rows = KIOSK_TIERS.map((t, i) => {
       const owned = current !== undefined && i <= current.tier;
       const cost = t.price - paid;
@@ -518,7 +519,16 @@ async function main() {
       <div class="head"><strong>🧇 Vaffelsalg ved garasjen til ${groomer.name}</strong><button data-k="close">✕</button></div>
       <p class="status">${status}</p>
       <table>${rows}</table>
-      <p class="note">Oppgradering koster mellomlegget: det dere har betalt, trekkes fra.</p>`;
+      <p class="note">Oppgradering koster mellomlegget: det dere har betalt, trekkes fra.</p>
+      <div class="experts">
+        <div><strong>🎯 ${EXPERTS.name}</strong><br><small>${EXPERTS.pitch}</small><br>
+          <small class="facts">I helgene: ${Math.round((EXPERTS.capacity - 1) * 100)} % flere vafler · flere stopper · +${EXPERTS.extraPrice} kr stykket</small></div>
+        <div>${current?.experts
+          ? `<span class="owned">✓ Avtale inngått</span>`
+          : !current || current.tier < EXPERTS.minTier
+            ? `<small>Krever minst ${KIOSK_TIERS[EXPERTS.minTier].short.toLowerCase()}</small>`
+            : `<button data-experts="hire" ${EXPERTS.price > budget ? "disabled" : ""}>Inngå avtale ${kr(EXPERTS.price)}</button>`}</div>
+      </div>`;
   };
 
   kioskPanel.addEventListener("click", (e) => {
@@ -528,6 +538,19 @@ async function main() {
     }
     if (button.dataset.k === "close") {
       kioskPanel.hidden = true;
+      return;
+    }
+    if (button.dataset.experts === "hire") {
+      const groomer = fleet.groomers[kioskGarage];
+      const k = groomer && kioskAt(groomer.garage.x, groomer.garage.y);
+      if (k && !k.experts && k.tier >= EXPERTS.minTier && EXPERTS.price <= budget) {
+        budget -= EXPERTS.price;
+        k.hireExperts();
+        expertsHiredToday = true;
+        showToast("🎯 <strong>Avtale med Nittedal Skytterlag!</strong> Fra lørdag står skytterlagets beste vaffelsteikere ved jernet. Treffsikkert.");
+        renderKiosk();
+        refreshHud();
+      }
       return;
     }
     const tier = Number(button.dataset.buy);
@@ -675,6 +698,7 @@ async function main() {
       waffles: stats.waffles,
       kioskBought: kioskBoughtToday,
       kioskUpgrade: kioskUpgradedToday,
+      expertsHired: expertsHiredToday,
       kioskBroken: kioskBrokenToday,
       kiosks: kiosks.length,
       icy: icy / n,
@@ -684,6 +708,7 @@ async function main() {
     kioskBoughtToday = null;
     kioskUpgradedToday = false;
     kioskBrokenToday = false;
+    expertsHiredToday = false;
     snowToday = 0;
     rainToday = 0;
     if (day + 1 >= paper.pressUntil) {
@@ -2016,7 +2041,7 @@ async function main() {
     weather: { snowDepth: weather.snowDepth, plans: weather.allPlans() },
     tracks: encodeTracks(map, tracks),
     garages: fleet.groomers.map((g) => ({ tile: map.toGrid(g.garage.x, g.garage.y), totalGroomed: g.totalGroomed })),
-    kiosks: kiosks.map((k) => ({ tile: map.toGrid(k.x, k.y), tier: k.tier, soldToday: k.soldToday, broken: k.broken })),
+    kiosks: kiosks.map((k) => ({ tile: map.toGrid(k.x, k.y), tier: k.tier, soldToday: k.soldToday, broken: k.broken, experts: k.experts })),
     schedule: fleet.schedule,
     reports: reports.map(({ report, rosy }) => ({ ...report, rosyChosen: rosy })),
     crew: map.toGrid(crew.x, crew.y),
@@ -2056,6 +2081,9 @@ async function main() {
         const k = placeKiosk(local[0], local[1], Math.min(saved.tier, KIOSK_TIERS.length - 1));
         k.soldToday = saved.soldToday;
         k.broken = saved.broken;
+        if (saved.experts) {
+          k.hireExperts();
+        }
       }
     }
     for (const r of save.reports) {
