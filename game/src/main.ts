@@ -706,6 +706,7 @@ async function main() {
       place,
       weather,
       lowest: elevations.length ? Math.min(...elevations) : map.elevationAt(startPoi.x, startPoi.y),
+      survey: crowd.takeSurvey(),
     });
     paper.bestWeek = Math.max(paper.bestWeek, paper.week.reduce((s, d) => s + d.skiers, 0));
     paper.kmAtLastEdition = trackKm();
@@ -1493,7 +1494,7 @@ async function main() {
         const cheapest = Math.min(...crossingOptions(obstacle, tracks.traffic(x, y), tracks.levelCrossing(x, y)).map((o) => o.price));
         out.push({ x, y, kind: "crossing", price: ground + cheapest });
       } else {
-        out.push({ x, y, kind: "new", price: ground });
+        out.push({ x, y, kind: tracks.passageOnRoad(x, y) ? "crossing" : "new", price: ground });
       }
     }
     return out;
@@ -1536,6 +1537,9 @@ async function main() {
       const named = tiles
         .filter((t, i) => t.kind === "crossing" && tiles[i - 1]?.kind !== "crossing")
         .map((t) => {
+          if (tracks.passageOnRoad(t.x, t.y)) {
+            return `Følger ${map.roadName(t.x, t.y) ?? "veien"} gjennom en eksisterende bru eller undergang — sporet må dele asfalten.`;
+          }
           if (tracks.obstacle(t.x, t.y) !== "rail") {
             return `Krysser ${map.roadName(t.x, t.y) ?? "en vei"} — du velger hvordan underveis.`;
           }

@@ -286,3 +286,12 @@ html.compact #tools [data-zoom] { order: 20; }
 label.auto-open { display: block; padding: 6px 12px 8px; font-size: 12px; color: #4b5a64; border-top: 1px solid #e2e7ee; cursor: pointer; }
 label.auto-open input { vertical-align: -2px; margin-right: 4px; }
 #paper label.auto-open { background: #f0eadb; font-family: system-ui, sans-serif; }
+#paper .survey { border-top: 1px solid #1d1d1d; margin-top: 10px; padding-top: 8px; }
+#paper .survey h3 { font-size: 16px; margin: 2px 0 6px; }
+#paper .survey .row { display: grid; grid-template-columns: 9.5em 1fr 3em; align-items: center; gap: 4px 8px; margin: 6px 0 2px; }
+#paper .survey .who { font-family: system-ui, sans-serif; font-size: 12px; font-weight: 600; }
+#paper .survey .bar { height: 10px; background: #e2dccb; border-radius: 5px; overflow: hidden; }
+#paper .survey .bar span { display: block; height: 100%; background: #1d1d1d; }
+#paper .survey .pct { font-family: system-ui, sans-serif; font-size: 12px; font-weight: 700; text-align: right; }
+#paper .survey .quote { grid-column: 1 / -1; margin: 0 0 4px; font-style: italic; font-size: 12px; color: #333; }
+#paper .survey .method { font-size: 11px; color: #666; margin: 6px 0 0; }

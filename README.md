@@ -120,8 +120,10 @@ story, picked from what the player did: snowcats holding up Rv. 4, a føremeldin
 more than the tracks delivered, snow left ungroomed, ice and bare ground, record weeks, happy
 skiers, new track, moose in the tracks, an empty till. Good press nudges reputation up and
 brings more skiers for the next four days; bad press does the opposite. Below the fold: short
-news, a snow-depth comparison with Rotnes, the "Sør i bygda" column, Gjøvikbanen and a
-reader's letter. A new edition opens on screen by itself, as does each morning's føremelding; a box at
+news, a snow-depth comparison with Rotnes, the "Sør i bygda" column, Gjøvikbanen, a
+reader's letter and "Varingen spør": how happy families, fitness skiers and racers have been
+since the last edition, each with a quote naming what bothered them most (worn or snowed-in
+track, road crossings, too short a network, round and round the same loop). A new edition opens on screen by itself, as does each morning's føremelding; a box at
 the bottom of each turns that off, and they then announce themselves instead (Varingen with a
 "Les avisa" button, a dot on the button and a 🗞 badge on the tab for the hidden tool bar).
 On a phone 🗞 and 📰 sit right after the tool button, and only one of them is open at a time.
@@ -144,7 +146,7 @@ not saved.
 Append `?debug` to the URL to expose the game state as `window.loype` for poking at
 from the browser console or a test script. `loype.fastForward(hours)` runs the game ahead as fast as it computes (a
 season takes a few seconds), with nothing drawn on the way, and `loype.history()` gives one
-row per finished day (skiers, satisfaction, donations, memberships, waffles, diesel,
+row per finished day, and `loype.crowd.verdicts` what went into each recent skier's verdict (skiers, satisfaction, donations, memberships, waffles, diesel,
 electricity, cash, reputation) for balancing runs.
 
 ## Generating a map

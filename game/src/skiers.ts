@@ -57,6 +57,8 @@ const COMPLAINTS = {
   trunk: ["Et vogntog! Et VOGNTOG!", "Jeg har stått her i ti minutter!", "Hvem fant på å legge løypa over Rv. 4?!", "Livet passerte revy. To ganger."],
 };
 
+const MAX_VERDICTS = 5000;
+
 function pick<T>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];
 }
@@ -212,6 +214,8 @@ class Skier {
   private target: [number, number];
   private previous: [number, number] | null = null;
   private readonly visited = new Set<number>();
+  /** Road and rail tiles crossed on the level this trip. */
+  private readonly crossed = new Set<number>();
   /** Has walked past a waffle stand on this trip, bought or not. */
   readonly passedKiosks = new Set<Kiosk>();
   private travelled = 0;
@@ -286,8 +290,13 @@ class Skier {
     tracks.wear(x, y, this.kind.wear);
     tracks.use(x, y);
     const atGrade = (t: [number, number] | null) => !!t && tracks.crossing[map.index(t[0], t[1])] === Crossing.AtGrade;
-    // Penalties and waiting apply once per crossing, not once per tile of road width.
-    if (atGrade([x, y]) && !atGrade(this.previous)) {
+    // Penalties and waiting apply once per crossing, not once per tile of road width, and a
+    // crossing met again on the next lap is not a new annoyance.
+    const crossedBefore = this.crossed.has(map.index(x, y)) || tracks.neighbours(x, y).some(([nx, ny]) => this.crossed.has(map.index(nx, ny)));
+    if (atGrade([x, y])) {
+      this.crossed.add(map.index(x, y));
+    }
+    if (atGrade([x, y]) && !atGrade(this.previous) && !crossedBefore) {
       const traffic = tracks.atGradeTraffic(x, y);
       const rail = traffic === RAIL_LEVEL_CROSSING;
       const level = rail ? 2 : traffic === roadTraffic(3) ? 3 : traffic === roadTraffic(2) ? 2 : 1;
@@ -355,7 +364,11 @@ class Skier {
     const variety = this.travelled > 0 ? Math.min(1, (this.visited.size / this.travelled) * 1.8) : 0;
     const longEnough = Math.min(1, this.travelled / this.goal + 0.3);
     this.satisfaction = Math.max(0, Math.min(1, avg * (0.7 + 0.3 * variety) * longEnough * penalty * this.roadMood));
+    this.verdict = { kind: this.kind.name, quality: avg, variety, longEnough, penalty, roadMood: this.roadMood, travelled: this.travelled, goal: this.goal };
   }
+
+  /** What went into the satisfaction, for balancing runs. */
+  verdict: TripVerdict | null = null;
 
   animate(dt: number, visible: boolean) {
     this.sprite.root.visible = visible;
@@ -472,6 +485,32 @@ export function findTrailheads(map: GameMap): Trailhead[] {
 
 const MEMBERSHIP_FEE = 400;
 
+export interface TripVerdict {
+  kind: string;
+  quality: number;
+  variety: number;
+  longEnough: number;
+  penalty: number;
+  roadMood: number;
+  travelled: number;
+  goal: number;
+}
+
+/** Per kind of skier: how many finished a trip, how many were happy, and the averages of what made the verdict. */
+export interface SurveyTally {
+  kind: string;
+  n: number;
+  happy: number;
+  satisfaction: number;
+  quality: number;
+  roadMood: number;
+  longEnough: number;
+  variety: number;
+}
+
+/** A trip this good counts as a happy skier. */
+const HAPPY = 0.6;
+
 export function emptyDay(): DayStats {
   return { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0, waffles: 0, waffleIncome: 0 };
 }
@@ -503,6 +542,24 @@ export class Crowd {
   today: DayStats = emptyDay();
   /** The club's waffle stands. */
   kiosks: Kiosk[] = [];
+  /** The latest finished trips and what made them good or bad, for balancing runs. */
+  readonly verdicts: (TripVerdict & { satisfaction: number })[] = [];
+  /** Running totals per kind of skier since the last survey. */
+  private readonly survey = new Map<string, SurveyTally>();
+
+  /** What each kind of skier has thought since the last time anyone asked; starts a fresh count. */
+  takeSurvey(): SurveyTally[] {
+    const out = [...this.survey.values()].map((t) => ({
+      ...t,
+      satisfaction: t.satisfaction / t.n,
+      quality: t.quality / t.n,
+      roadMood: t.roadMood / t.n,
+      longEnough: t.longEnough / t.n,
+      variety: t.variety / t.n,
+    }));
+    this.survey.clear();
+    return out;
+  }
   private arrivals = new Map<Trailhead, number>();
   private talk: { c: Container; ttl: number; skier: Skier }[] = [];
   private popups: { t: Text; ttl: number }[] = [];
@@ -669,6 +726,21 @@ export class Crowd {
     this.reputation = Math.max(0.05, this.reputation + (s.satisfaction - this.reputation) * 0.004);
     this.today.finished++;
     this.today.satisfaction += s.satisfaction;
+    if (s.verdict) {
+      const t = this.survey.get(s.verdict.kind) ?? { kind: s.verdict.kind, n: 0, happy: 0, satisfaction: 0, quality: 0, roadMood: 0, longEnough: 0, variety: 0 };
+      t.n++;
+      t.happy += s.satisfaction >= HAPPY ? 1 : 0;
+      t.satisfaction += s.satisfaction;
+      t.quality += s.verdict.quality;
+      t.roadMood += s.verdict.roadMood;
+      t.longEnough += s.verdict.longEnough;
+      t.variety += s.verdict.variety;
+      this.survey.set(s.verdict.kind, t);
+      this.verdicts.push({ ...s.verdict, satisfaction: s.satisfaction });
+      if (this.verdicts.length > MAX_VERDICTS) {
+        this.verdicts.shift();
+      }
+    }
     if (s.satisfaction > 0.6 && Math.random() < 0.03 * s.satisfaction) {
       this.earn(MEMBERSHIP_FEE);
       this.today.members++;
