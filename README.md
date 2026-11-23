@@ -89,6 +89,16 @@ swings, snow and rain, and a snowpack that is deeper higher up. Each track tile 
 how fresh it is, how much new snow lies in it and how icy it is; tracks are drawn by
 condition, from crisp blue corduroy to worn, snowed-in, icy or bare.
 
+## Varingen
+
+The local paper comes out every Thursday morning (`V`). Its front page is the week's biggest
+story, picked from what the player did: snowcats holding up Rv. 4, a føremelding that promised
+more than the tracks delivered, snow left ungroomed, ice and bare ground, record weeks, happy
+skiers, new track, moose in the tracks, an empty till. Good press nudges reputation up and
+brings more skiers for the next four days; bad press does the opposite. Below the fold: short
+news, a snow-depth comparison with Rotnes, the "Sør i bygda" column, Gjøvikbanen and a
+reader's letter.
+
 ## Saving
 
 The game saves in the browser (localStorage); nothing leaves the player's machine. It

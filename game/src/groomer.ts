@@ -23,7 +23,7 @@ type State = "home" | "grooming" | "returning";
 export interface Ledger {
   spend(amount: number): boolean;
   /** Something happened out there that people will talk about. */
-  notify(text: string): void;
+  notify(text: string, road?: string): void;
 }
 
 function inWindow(schedule: Schedule, hourOfDay: number): boolean {
@@ -274,6 +274,7 @@ export class Groomer {
       const road = tracks.roadName(x, y) ?? "riksveien";
       ledger.notify(
         `🚜 ${this.name} sperret ${road} i ${2 + Math.floor(Math.random() * 9)} minutter. Vogntogsjåførene var ikke imponert.`,
+        road,
       );
     }
   }

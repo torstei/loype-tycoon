@@ -81,7 +81,7 @@ export function wax(temperature: number, newSnow: number, iceShare: number): str
 }
 
 /** Which named place each track tile is nearest to, so the report can speak of areas. */
-function areas(map: GameMap, tracks: TrackNetwork): Map<string, [number, number][]> {
+export function areas(map: GameMap, tracks: TrackNetwork): Map<string, [number, number][]> {
   const names = map.pois.filter((p) => p.name && (p.kind === "place" || p.kind === "peak" || p.kind === "station"));
   const out = new Map<string, [number, number][]>();
   for (const [x, y] of tracks.each()) {

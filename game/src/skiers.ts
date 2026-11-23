@@ -484,6 +484,8 @@ export class Crowd {
   reputation = 0.5;
   /** The day's føremelding promised more than the tracks could deliver. */
   hype = false;
+  /** Turnout from the latest Varingen front page: above 1 after good press, below after bad. */
+  press = 1;
   readonly lights = new Graphics();
   private darkShare = 0;
   today: DayStats = { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0 };
@@ -558,7 +560,7 @@ export class Crowd {
     }
     const km = (tracks.size * this.map.tileSize) / 1000;
     const size = Math.min(2, 0.5 + km / 6);
-    return out * holiday(day).factor * sky * size * (0.3 + 1.4 * this.reputation) * (this.hype ? 1.25 : 1);
+    return out * holiday(day).factor * sky * size * (0.3 + 1.4 * this.reputation) * (this.hype ? 1.25 : 1) * this.press;
   }
 
   update(hours: number, clock: GameClock, weather: Weather, tracks: TrackNetwork) {

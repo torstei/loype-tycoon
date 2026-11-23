@@ -1,6 +1,7 @@
 import { Grid, GameMap, GridTile } from "./map";
 import { DayStats } from "./skiers";
 import { Crossing, TrackNetwork } from "./tracks";
+import { DayNews, Edition } from "./varingen";
 import { DayPlan } from "./weather";
 
 export const SAVE_FORMAT = "loype-tycoon-save";
@@ -49,6 +50,19 @@ export interface SaveGame {
   schedule: "night" | "always";
   reports: SavedReport[];
   crew: GridTile;
+  /** Absent in saves from before the paper existed. */
+  varingen?: {
+    editions: Edition[];
+    week: DayNews[];
+    kmAtLastEdition: number;
+    bestWeek: number;
+    lastDay: number;
+    pressUntil: number;
+    press: number;
+    roadsToday: string[];
+    snowToday: number;
+    rainToday: number;
+  };
 }
 
 const key = (slot: Slot) => `loype-tycoon:save:${slot}`;

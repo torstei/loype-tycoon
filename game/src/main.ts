@@ -1,8 +1,9 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { Camera, OVERVIEW_BELOW } from "./camera";
-import { dayLabel, GameClock, SPEEDS } from "./clock";
+import { dayLabel, GameClock, SPEEDS, weekday } from "./clock";
 import { Fleet, GARAGE_REACH } from "./groomer";
-import { Report, writeReport } from "./report";
+import { areas, Report, writeReport } from "./report";
+import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
 import {
   decodeTracks,
   deleteSlot,
@@ -82,6 +83,7 @@ async function main() {
   let dieselToday = 0;
   let incidentsToday: string[] = [];
   let incidentsYesterday: string[] = [];
+  let roadsToday: string[] = [];
   const crowd = new Crowd(map, (amount) => {
     budget += amount;
   });
@@ -140,8 +142,11 @@ async function main() {
       dieselToday += amount;
       return true;
     },
-    notify: (text: string) => {
+    notify: (text: string, road?: string) => {
       incidentsToday.push(text);
+      if (road) {
+        roadsToday.push(road);
+      }
       crowd.reputation = Math.max(0.05, crowd.reputation - 0.02);
       showToast(text);
     },
@@ -149,13 +154,15 @@ async function main() {
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports } });
+    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, publishEdition: () => publishEdition() } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
   let sinceRedraw = 0;
   let snowSinceReport = 0;
   let rainSinceReport = 0;
+  let snowToday = 0;
+  let rainToday = 0;
   let lastReportDay = -1;
   let yesterday: DayStats | null = null;
   let yesterdayHyped = false;
@@ -168,6 +175,8 @@ async function main() {
       const { snow, rain } = weather.advance(clock.hours - hours, hours);
       snowSinceReport += snow;
       rainSinceReport += rain;
+      snowToday += snow;
+      rainToday += rain;
       tracks.applyWeather(hours, weather, snow, rain);
       fleet.update(hours, clock.hours, clock.hourOfDay, tracks, weather, ledger);
       crowd.update(hours, clock, weather, tracks);
@@ -187,6 +196,9 @@ async function main() {
     if (clock.day > lastReportDay && clock.hourOfDay >= 7 && clock.hourOfDay < 12 && tracks.size > 0) {
       lastReportDay = clock.day;
       publishReport();
+    }
+    if (weekday(clock.day) === PUBLISH_WEEKDAY && clock.hourOfDay >= PUBLISH_HOUR && clock.day > paper.lastDay && fleet.garages.length > 0) {
+      publishEdition();
     }
     if (clock.day !== forecastDay) {
       if (forecastDay >= 0) {
@@ -235,6 +247,7 @@ async function main() {
     document.getElementById("forecast")!.style.top = top;
     document.getElementById("help")!.style.top = top;
     document.getElementById("report")!.style.top = top;
+    document.getElementById("paper")!.style.top = top;
   };
   new ResizeObserver(placePanels).observe(topbar);
   const fleetPanel = document.getElementById("fleet")!;
@@ -303,6 +316,7 @@ async function main() {
     incidentsToday = [];
     const stats = crowd.endDay();
     yesterday = stats;
+    logNews(day, stats);
     const happy = stats.finished > 0 ? Math.round((stats.satisfaction / stats.finished) * 100) : 0;
     const diesel = dieselToday;
     dieselToday = 0;
@@ -314,6 +328,127 @@ async function main() {
       ${stats.members > 0 ? `· ${stats.members} nye medlemmer <span class="plus">+${kr(stats.members * 400)}</span>` : ""}
       · diesel <span class="minus">−${kr(diesel)}</span>`);
   };
+
+  const paper = {
+    editions: [] as Edition[],
+    week: [] as DayNews[],
+    kmAtLastEdition: 0,
+    bestWeek: 0,
+    lastDay: -1,
+    pressUntil: -1,
+  };
+  let editionIndex = -1;
+  const paperPanel = document.getElementById("paper")!;
+  const paperButton = document.getElementById("paper-button")!;
+  const trackKm = () => (tracks.size * map.tileSize) / 1000;
+
+  const logNews = (day: number, stats: DayStats) => {
+    let groomed = 0;
+    let trampled = 0;
+    let icy = 0;
+    let bare = 0;
+    const now = clock.hours;
+    for (const [x, y] of tracks.each()) {
+      const i = map.index(x, y);
+      groomed += now - tracks.groomedAt[i] < 24 ? 1 : 0;
+      trampled += now - tracks.trampledAt[i] < 24 ? 1 : 0;
+      const c = tracks.condition(x, y, weather);
+      icy += c === "icy" ? 1 : 0;
+      bare += c === "bare" ? 1 : 0;
+    }
+    const n = Math.max(1, tracks.size);
+    paper.week.push({
+      day,
+      skiers: stats.skiers,
+      happy: stats.finished > 0 ? stats.satisfaction / stats.finished : null,
+      donations: stats.donations,
+      members: stats.members,
+      diesel: dieselToday,
+      hyped: yesterdayHyped,
+      roads: roadsToday,
+      trampled,
+      groomed,
+      snow: snowToday,
+      rain: rainToday,
+      tiles: tracks.size,
+      icy: icy / n,
+      bare: bare / n,
+    });
+    roadsToday = [];
+    snowToday = 0;
+    rainToday = 0;
+    if (day + 1 >= paper.pressUntil) {
+      crowd.press = 1;
+    }
+  };
+
+  const publishEdition = () => {
+    const groups = areas(map, tracks);
+    const place = [...groups.entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0] ?? "Hakadal";
+    const elevations = [...tracks.each()].map(([x, y]) => map.elevationAt(x, y));
+    const edition = writeEdition({
+      day: clock.day,
+      number: paper.editions.length + 1,
+      week: paper.week,
+      km: trackKm(),
+      kmAtLastEdition: paper.kmAtLastEdition,
+      budget,
+      bestWeek: paper.bestWeek,
+      place,
+      weather,
+      lowest: elevations.length ? Math.min(...elevations) : map.elevationAt(startPoi.x, startPoi.y),
+    });
+    paper.bestWeek = Math.max(paper.bestWeek, paper.week.reduce((s, d) => s + d.skiers, 0));
+    paper.kmAtLastEdition = trackKm();
+    paper.week = [];
+    paper.lastDay = clock.day;
+    paper.editions.push(edition);
+    editionIndex = paper.editions.length - 1;
+    crowd.reputation = Math.min(1, Math.max(0.05, crowd.reputation + edition.tone * PRESS_REPUTATION));
+    crowd.press = 1 + edition.tone * PRESS_DEMAND;
+    paper.pressUntil = clock.day + PRESS_DAYS;
+    const effect = edition.tone > 0 ? "God omtale: flere tar turen hit i helgen." : edition.tone < 0 ? "Dårlig omtale: noen blir hjemme i helgen." : "";
+    showToast(`🗞 <strong>Varingen er ute:</strong> «${edition.headline}» ${effect}`);
+    if (paperPanel.hidden) {
+      paperButton.classList.add("unread");
+    } else {
+      renderPaper();
+    }
+  };
+
+  const showPaper = (open: boolean) => {
+    paperPanel.hidden = !open;
+    if (open) {
+      paperButton.classList.remove("unread");
+      renderPaper();
+    }
+  };
+
+  const renderPaper = () => {
+    const edition = paper.editions[editionIndex];
+    const bar = `<div class="bar">
+        <button data-p="prev" ${editionIndex <= 0 ? "disabled" : ""}>‹</button>
+        <strong>🗞 Varingen</strong>
+        <button data-p="next" ${editionIndex >= paper.editions.length - 1 ? "disabled" : ""}>›</button>
+        <button data-p="close">✕</button>
+      </div>`;
+    paperPanel.innerHTML = `${bar}<div class="page">${edition ? edition.html : "<p class=\"empty\">Varingen kommer ut hver torsdag. Gi dem noe å skrive om.</p>"}</div>`;
+  };
+
+  paperPanel.addEventListener("click", (e) => {
+    const action = (e.target as HTMLElement).closest("button")?.dataset.p;
+    if (action === "close") {
+      showPaper(false);
+      return;
+    }
+    if (action === "prev") {
+      editionIndex = Math.max(0, editionIndex - 1);
+    } else if (action === "next") {
+      editionIndex = Math.min(paper.editions.length - 1, editionIndex + 1);
+    }
+    renderPaper();
+  });
+  paperButton.addEventListener("click", () => showPaper(paperPanel.hidden));
 
   const reports: { report: Report; rosy: boolean }[] = [];
   let reportIndex = -1;
@@ -1033,11 +1168,14 @@ async function main() {
       toggleMenu();
     } else if (e.code === "KeyF") {
       showReport(reportPanel.hidden);
+    } else if (e.code === "KeyV") {
+      showPaper(paperPanel.hidden);
     } else if (e.code === "KeyH" || e.key === "?") {
       help.hidden = !help.hidden;
     } else if (e.code === "Escape") {
       help.hidden = true;
       showReport(false);
+      showPaper(false);
     } else {
       const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage" } as Record<string, Tool>)[e.code];
       if (!t) {
@@ -1073,6 +1211,7 @@ async function main() {
     schedule: fleet.schedule,
     reports: reports.map(({ report, rosy }) => ({ ...report, rosyChosen: rosy })),
     crew: map.toGrid(crew.x, crew.y),
+    varingen: { ...paper, press: crowd.press, roadsToday, snowToday, rainToday },
   });
 
   /** Rebuild a saved game on this freshly started page. Returns what to tell the player. */
@@ -1105,6 +1244,17 @@ async function main() {
       reports.push({ report: { day: r.day, honest: r.honest, rosy: r.rosy, headline: r.headline as Report["headline"] }, rosy: r.rosyChosen });
     }
     reportIndex = reports.length - 1;
+    if (save.varingen) {
+      const v = save.varingen;
+      Object.assign(paper, { editions: v.editions, week: v.week, kmAtLastEdition: v.kmAtLastEdition, bestWeek: v.bestWeek, lastDay: v.lastDay, pressUntil: v.pressUntil });
+      crowd.press = v.press;
+      roadsToday = [...v.roadsToday];
+      snowToday = v.snowToday;
+      rainToday = v.rainToday;
+      editionIndex = paper.editions.length - 1;
+    } else {
+      paper.lastDay = clock.day;
+    }
     const crewAt = map.fromGrid(save.crew);
     if (crewAt) {
       [crew.x, crew.y] = crewAt;
