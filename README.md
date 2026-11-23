@@ -176,6 +176,11 @@ one) it says so before loading the map, offers to share or copy the link to open
 computer, and lets anyone carry on anyway, warned that it will be painful, for the rest of the
 browser session.
 
+On a narrow window or a touch-only device the layout turns compact: a one-line status bar on
+top, the tools as icons in a bar at the bottom (with zoom and forecast buttons), panels across
+the full width, and tile info on tap instead of hover. Touch gestures beyond that (pinch zoom,
+panning while building) are still to come.
+
 ## Deploying
 
 The game is published at https://torstei.github.io/loype-tycoon/. Changes reach `main` through

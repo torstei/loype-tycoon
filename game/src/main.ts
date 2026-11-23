@@ -4,7 +4,7 @@ import { dayLabel, GameClock, SPEEDS, weekday } from "./clock";
 import { Fleet, GARAGE_REACH } from "./groomer";
 import { areas, Report, writeReport } from "./report";
 import { Kiosk, KIOSK_TIERS } from "./kiosk";
-import { waitForTouchChoice } from "./mobile";
+import { touchOnly, waitForTouchChoice } from "./mobile";
 import { showStartupError, watchForStaleBuild } from "./startup";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
 import {
@@ -73,12 +73,17 @@ const PAN_KEYS: Record<string, [number, number]> = {
 };
 
 const START_BUDGET = 150_000;
+/** Below this window width (or on a touch-only device) the tools move to a bar at the bottom. */
+const COMPACT_BELOW = 760;
 /** How far from the network a drag may start and still be linked up automatically, in tiles. */
 const CONNECT_REACH = 3;
 const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
 
 async function main() {
   await waitForTouchChoice();
+  const updateCompact = () => document.documentElement.classList.toggle("compact", touchOnly() || innerWidth < COMPACT_BELOW);
+  updateCompact();
+  window.addEventListener("resize", updateCompact);
   const map = await GameMap.load("hakadal");
   const tracks = new TrackNetwork(map);
   const clock = new GameClock();
@@ -264,8 +269,16 @@ async function main() {
   document.getElementById("attribution")!.textContent = map.attribution;
 
   const topbar = document.getElementById("topbar")!;
+  const fleetPanel = document.getElementById("fleet")!;
+  const pausedBanner = document.getElementById("paused")!;
+  const toolbar = document.getElementById("tools")!;
   const placePanels = () => {
     const top = `${topbar.offsetHeight + 8}px`;
+    const root = document.documentElement.style;
+    root.setProperty("--top", top);
+    root.setProperty("--bar", `${document.documentElement.classList.contains("compact") ? toolbar.offsetHeight : 0}px`);
+    root.setProperty("--fleet", `${fleetPanel.hidden ? 0 : fleetPanel.offsetHeight + 6}px`);
+    root.setProperty("--paused", `${pausedBanner.hidden ? 0 : pausedBanner.offsetHeight + 8}px`);
     document.getElementById("forecast")!.style.top = top;
     document.getElementById("help")!.style.top = top;
     document.getElementById("report")!.style.top = top;
@@ -273,8 +286,17 @@ async function main() {
     document.getElementById("paper")!.style.top = top;
   };
   new ResizeObserver(placePanels).observe(topbar);
-  const fleetPanel = document.getElementById("fleet")!;
-  const pausedBanner = document.getElementById("paused")!;
+  new ResizeObserver(placePanels).observe(toolbar);
+  new ResizeObserver(placePanels).observe(fleetPanel);
+  new ResizeObserver(placePanels).observe(pausedBanner);
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-zoom]")) {
+    button.addEventListener("click", () => camera.zoomAt(app.screen.width / 2, app.screen.height / 2, Number(button.dataset.zoom)));
+  }
+  document.getElementById("forecast-button")!.addEventListener("click", () => {
+    const open = document.getElementById("forecast")!.classList.toggle("open");
+    document.documentElement.classList.toggle("forecast-open", open);
+  });
+
   pausedBanner.addEventListener("click", () => {
     clock.paused = false;
     refreshHud();
@@ -285,14 +307,14 @@ async function main() {
     const km = (tracks.size * map.tileSize) / 1000;
     const nowIcon = weather.precipRate > 0 ? (weather.temperature < 0.8 ? "🌨️" : "🌧️") : clock.daylight() > 0.5 ? "☀️" : "🌙";
     hud.innerHTML = `
-      <strong>Løype Tycoon</strong> · ${map.title}
+      <strong class="title">Løype Tycoon · ${map.title}</strong>
       <span class="clock">${clock.paused ? "⏸ " : ""}${clock.label()}</span>
-      <span>${nowIcon} ${weather.temperature.toFixed(0)} °C · snø ${weather.snowDepth.toFixed(0)} cm</span>
-      <span>Kasse: ${kr(budget)}</span>
-      <span>⛷ ${crowd.today.skiers} i dag · omdømme ${Math.round(crowd.reputation * 100)} %</span>
-      <span>Løypenett: ${km.toFixed(2)} km</span>
-      <span class="mode ${crew.building ? "on" : ""}">Tråkkemodus: ${crew.building ? "PÅ" : "av"}</span>
-      <span class="hint">H = hjelp</span>`;
+      <span class="weather">${nowIcon} <span class="wide-only">${weather.temperature.toFixed(0)} °C · snø ${weather.snowDepth.toFixed(0)} cm</span><span class="compact-only">${weather.temperature.toFixed(0)}°</span></span>
+      <span class="cash"><span class="wide-only">Kasse: </span>${kr(budget)}</span>
+      <span class="skiers">⛷ ${crowd.today.skiers}<span class="wide-only"> i dag · omdømme ${Math.round(crowd.reputation * 100)} %</span></span>
+      <span class="km wide-only">Løypenett: ${km.toFixed(2)} km</span>
+      <span class="mode wide-only ${crew.building ? "on" : ""}">Tråkkemodus: ${crew.building ? "PÅ" : "av"}</span>
+      <span class="hint wide-only">H = hjelp</span>`;
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-tool]")) {
       btn.classList.toggle("active", btn.dataset.tool === tool);
     }
@@ -1001,7 +1023,9 @@ async function main() {
       crew.x = x;
       crew.y = y;
       setTool("build");
-      showToast("🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S. Tiden starter når den første løypa er lagt.");
+      showToast(`🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! ${document.documentElement.classList.contains("compact")
+        ? "Bygg den første løypa ved å dra med fingeren ut fra garasjen. Flytt kartet med 👀."
+        : "Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S."} Tiden starter når den første løypa er lagt.`);
     } else {
       setTool("look");
     }
@@ -1241,6 +1265,8 @@ async function main() {
   app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   app.canvas.addEventListener("pointerdown", (e) => {
     const w = world.toLocal({ x: e.offsetX, y: e.offsetY });
+    // A finger never hovers: tapping a tile is how its info shows up.
+    describe(...tileAt(e.offsetX, e.offsetY));
     if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
       return;
     }

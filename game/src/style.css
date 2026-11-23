@@ -2,7 +2,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #stage { position: fixed; inset: 0; }
 #topbar { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; gap: 12px;
   padding: 8px 12px; background: rgba(255, 255, 255, 0.88); border-bottom: 2px solid #1f5fd1; flex-wrap: wrap; }
-#hud span { margin-left: 16px; font-variant-numeric: tabular-nums; }
+#hud > span { margin-left: 16px; font-variant-numeric: tabular-nums; }
 #tools button { font: inherit; padding: 4px 10px; border: 1px solid #9aa8b2; background: #fff; border-radius: 4px; cursor: pointer; }
 #tools button.active { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
 #info { position: fixed; left: 12px; bottom: 28px; padding: 8px 10px; background: rgba(255, 255, 255, 0.9);
@@ -203,3 +203,45 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #startup-error button { font: inherit; font-weight: 700; padding: 10px 18px; border-radius: 10px; border: 2px solid #1f5fd1;
   background: #1f5fd1; color: #fff; cursor: pointer; margin: 8px 0; }
 #startup-error .details { font-size: 12px; color: #6a7884; word-break: break-word; }
+
+/* Narrow screens and touch-only devices: a slim status line on top, the tools in a bar at the bottom. */
+.compact-only { display: none !important; }
+html.compact .compact-only { display: revert !important; }
+html.compact .wide-only { display: none !important; }
+html.compact { --bar: 104px; }
+html.compact #stage canvas { touch-action: none; }
+html.compact #topbar { padding: 4px 8px; gap: 4px; border-bottom-width: 1px; }
+html.compact #hud { font-size: 13px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+html.compact #hud > span { margin-left: 0; }
+html.compact #hud .title { display: none; }
+html.compact #tools { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; justify-content: center; gap: 4px;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: rgba(255, 255, 255, 0.94); border-top: 2px solid #1f5fd1; }
+html.compact #tools { gap: 3px; }
+html.compact #tools button { width: 42px; min-height: 40px; padding: 2px 0; font-size: 18px; }
+html.compact #tools .label { display: none; }
+html.compact #tools .speed { display: contents; }
+html.compact #tools .speed button { padding: 2px 0; font-size: 14px; letter-spacing: -2px; }
+html.compact #tools [data-speed="1"], html.compact #tools [data-speed="3"] { display: none; }
+html.compact #forecast { display: none; }
+html.compact #forecast.open { display: block; left: 8px; right: 8px; max-width: none; }
+html.compact #forecast .days { justify-content: space-around; }
+html.compact.forecast-open #info { display: none; }
+html.compact #info { left: 8px; top: calc(var(--top, 44px) + var(--paused, 0px)); bottom: auto; min-width: 0;
+  max-width: calc(100vw - 16px); font-size: 12px; padding: 5px 8px; line-height: 1.35; }
+html.compact #fleet { left: 8px; right: 8px; bottom: calc(var(--bar) + 6px); min-width: 0; font-size: 12px; padding: 5px 8px; }
+html.compact #toast { bottom: calc(var(--bar) + var(--fleet, 0px) + 12px); max-width: calc(100vw - 16px); width: max-content;
+  box-sizing: border-box; font-size: 12px; }
+html.compact #setup { bottom: calc(var(--bar) + 8px); font-size: 13px; padding: 8px 12px; }
+html.compact #setup strong { font-size: 14px; }
+html.compact #report, html.compact #paper { left: 8px; right: 8px; width: auto; transform: none;
+  max-height: calc(100dvh - var(--top, 60px) - var(--bar) - 12px); }
+html.compact #paper .masthead .title { font-size: 34px; }
+html.compact #paper .lead h2 { font-size: 22px; }
+html.compact #help { display: none; }
+html.compact #legend { left: 8px; bottom: calc(var(--bar) + 60px); font-size: 12px; }
+html.compact #attribution { bottom: calc(var(--bar) + 2px); font-size: 9px; opacity: 0.7; }
+html.compact #paused { font-size: 13px; padding: 6px 12px; max-width: calc(100vw - 24px); white-space: normal; }
+html.compact #crossing .card, html.compact #game-menu, html.compact #kiosk { max-height: calc(100dvh - 24px); overflow-y: auto;
+  box-sizing: border-box; width: calc(100vw - 16px); }
+html.compact #setup, html.compact #report, html.compact #paper, html.compact #forecast.open { box-sizing: border-box; }
+html.compact #setup { width: calc(100vw - 16px); }
