@@ -4,6 +4,7 @@ import { GameMap } from "./map";
 import { PX } from "./render";
 import { Flag } from "./terrain";
 import { Crossing, RAIL_LEVEL_CROSSING, roadTraffic, TrackNetwork } from "./tracks";
+import { coldAppetite, Kiosk, KIOSK_REACH, kioskDraw } from "./kiosk";
 import { Weather } from "./weather";
 
 export type TrailheadKind = "station" | "parking" | "homes";
@@ -211,6 +212,8 @@ class Skier {
   private target: [number, number];
   private previous: [number, number] | null = null;
   private readonly visited = new Set<number>();
+  /** Has walked past a waffle stand on this trip, bought or not. */
+  readonly passedKiosks = new Set<Kiosk>();
   private travelled = 0;
   private qualitySum = 0;
   /** Multiplied down a little at every level crossing, a lot at a busy one. */
@@ -469,12 +472,19 @@ export function findTrailheads(map: GameMap): Trailhead[] {
 
 const MEMBERSHIP_FEE = 400;
 
+export function emptyDay(): DayStats {
+  return { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0, waffles: 0, waffleIncome: 0 };
+}
+
 export interface DayStats {
   skiers: number;
   donations: number;
   members: number;
   satisfaction: number;
   finished: number;
+  waffles: number;
+  /** What the waffles earned after ingredients. */
+  waffleIncome: number;
 }
 
 export class Crowd {
@@ -490,7 +500,9 @@ export class Crowd {
   press = 1;
   readonly lights = new Graphics();
   private darkShare = 0;
-  today: DayStats = { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0 };
+  today: DayStats = emptyDay();
+  /** The club's waffle stands. */
+  kiosks: Kiosk[] = [];
   private arrivals = new Map<Trailhead, number>();
   private talk: { c: Container; ttl: number; skier: Skier }[] = [];
   private popups: { t: Text; ttl: number }[] = [];
@@ -562,7 +574,7 @@ export class Crowd {
     }
     const km = (tracks.size * this.map.tileSize) / 1000;
     const size = Math.min(2, 0.5 + km / 6);
-    return out * holiday(day).factor * sky * size * (0.3 + 1.4 * this.reputation) * (this.hype ? 1.25 : 1) * this.press;
+    return out * holiday(day).factor * sky * size * (0.3 + 1.4 * this.reputation) * (this.hype ? 1.25 : 1) * this.press * (1 + kioskDraw(this.kiosks));
   }
 
   update(hours: number, clock: GameClock, weather: Weather, tracks: TrackNetwork) {
@@ -595,6 +607,32 @@ export class Crowd {
     }
     for (const s of this.skiers.filter((s) => s.done)) {
       this.leave(s);
+    }
+    this.sellWaffles(clock, weather);
+  }
+
+  /** Skiers passing an open stand may stop for a waffle: once per stand per trip. */
+  private sellWaffles(clock: GameClock, weather: Weather) {
+    for (const k of this.kiosks) {
+      if (!k.isOpen(clock.day, clock.hourOfDay)) {
+        continue;
+      }
+      const [kx, ky] = k.spot;
+      for (const s of this.skiers) {
+        if (s.passedKiosks.has(k) || Math.hypot(s.px - (kx + 0.5), s.py - (ky + 0.5)) > KIOSK_REACH) {
+          continue;
+        }
+        s.passedKiosks.add(k);
+        if (!k.hasWaffles() || Math.random() > k.spec.appeal * coldAppetite(weather.temperature)) {
+          continue;
+        }
+        const net = k.spec.salePrice - k.spec.ingredients;
+        k.soldToday++;
+        this.today.waffles++;
+        this.today.waffleIncome += net;
+        this.earn(net);
+        this.popup(`🧇 +${net} kr`, (kx + 0.5) * PX, (ky - 0.6) * PX);
+      }
     }
   }
 
@@ -685,8 +723,11 @@ export class Crowd {
   /** Close the books for the day and start a fresh tally. */
   endDay(): DayStats {
     const stats = { ...this.today };
-    this.today = { skiers: 0, donations: 0, members: 0, satisfaction: 0, finished: 0 };
+    this.today = emptyDay();
     this.hype = false;
+    for (const k of this.kiosks) {
+      k.soldToday = 0;
+    }
     for (const h of this.trailheads) {
       h.today = 0;
     }

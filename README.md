@@ -103,6 +103,16 @@ swings, snow and rain, and a snowpack that is deeper higher up. Each track tile 
 how fresh it is, how much new snow lies in it and how icy it is; tracks are drawn by
 condition, from crisp blue corduroy to worn, snowed-in, icy or bare.
 
+## Waffles
+
+Each garage can get a waffle stand, bought and upgraded from the 🧇 button in the snowcat
+panel: from a thermos and a waffle iron on a camping table (volunteers, weekends only) via a
+booth and a kiosk with benches to the Vaffel-O-Matic 3000, which never runs out, stays open
+late, pays an electricity bill every day and now and then jams. Upgrading costs the
+difference. Skiers passing close to an open stand may stop for one, more often when it is
+cold, up to what the stand can make in a day; each stand also draws a few more skiers to the
+area. Sales show in the day's summary and in Varingen.
+
 ## Varingen
 
 The local paper comes out every Thursday morning (`V`). Its front page is the week's biggest

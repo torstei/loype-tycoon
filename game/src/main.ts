@@ -3,6 +3,7 @@ import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, GameClock, SPEEDS, weekday } from "./clock";
 import { Fleet, GARAGE_REACH } from "./groomer";
 import { areas, Report, writeReport } from "./report";
+import { Kiosk, KIOSK_TIERS } from "./kiosk";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
 import {
   decodeTracks,
@@ -21,7 +22,7 @@ import {
   writeSlot,
 } from "./savegame";
 import { Skijorer } from "./skijor";
-import { Crowd, DayStats } from "./skiers";
+import { Crowd, DayStats, emptyDay } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
@@ -121,7 +122,8 @@ async function main() {
   const trackLayer = new Graphics();
   const trailheadLayer = new Container();
   const skijorer = new Skijorer(map);
-  world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, fleet.machineLayer, crowd.layer, skijorer.layer);
+  const kioskLayer = new Container();
+  world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, kioskLayer, fleet.machineLayer, crowd.layer, skijorer.layer);
   const cursor = new Graphics();
   const endsLayer = new Graphics();
   const refusalTag = new Container();
@@ -165,7 +167,7 @@ async function main() {
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, publishEdition: () => publishEdition() } });
+    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks, publishEdition: () => publishEdition() } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -302,9 +304,18 @@ async function main() {
     fleetPanel.innerHTML = `
       <div class="head"><strong>Løypemaskiner</strong>
         <button id="schedule">${fleet.schedule === "night" ? "🌙 Prepper om natta" : "🕑 Prepper døgnet rundt"}</button></div>
-      ${fleet.groomers.map((g) => `<div class="row"><span class="name">🚜 ${g.name}</span> ${g.status}</div>`).join("")}`;
+      ${fleet.groomers.map((g, i) => {
+        const k = kioskAt(g.garage.x, g.garage.y);
+        return `<div class="row"><span class="name">🚜 ${g.name}</span> ${g.status}
+          <button class="kiosk" data-kiosk="${i}" title="Vaffelsalg ved garasjen">🧇 ${k ? `${k.spec.short}${k.broken ? " (i ustand)" : ""}` : "Vaffelsalg?"}</button></div>`;
+      }).join("")}`;
   };
   fleetPanel.addEventListener("pointerdown", (e) => {
+    const kioskButton = (e.target as HTMLElement).closest<HTMLElement>("[data-kiosk]");
+    if (kioskButton) {
+      openKiosk(Number(kioskButton.dataset.kiosk));
+      return;
+    }
     if ((e.target as HTMLElement).id === "schedule") {
       fleet.schedule = fleet.schedule === "night" ? "always" : "night";
       refreshHud();
@@ -334,6 +345,113 @@ async function main() {
     toastTimer = window.setTimeout(() => (toast.hidden = true), 7000);
   };
 
+  const kiosks = crowd.kiosks;
+  const kioskAt = (x: number, y: number) => kiosks.find((k) => k.x === x && k.y === y);
+  const kioskPanel = document.getElementById("kiosk")!;
+  let kioskGarage = -1;
+  let kioskBoughtToday: string | null = null;
+  let kioskUpgradedToday = false;
+  let kioskBrokenToday = false;
+
+  const placeKiosk = (x: number, y: number, tier: number): Kiosk => {
+    const existing = kioskAt(x, y);
+    if (existing) {
+      existing.upgrade(tier);
+      return existing;
+    }
+    const k = new Kiosk(x, y, tier);
+    kiosks.push(k);
+    kioskLayer.addChild(k.sprite);
+    return k;
+  };
+
+  const openKiosk = (garageIndex: number) => {
+    kioskGarage = garageIndex;
+    kioskPanel.hidden = false;
+    renderKiosk();
+  };
+
+  const renderKiosk = () => {
+    const groomer = fleet.groomers[kioskGarage];
+    if (!groomer) {
+      kioskPanel.hidden = true;
+      return;
+    }
+    const current = kioskAt(groomer.garage.x, groomer.garage.y);
+    const paid = current ? current.spec.price : 0;
+    const status = !current
+      ? "Ingen vaffelsalg her ennå. Vafler gir inntekt, og folk tar gjerne en tur dit det lukter vaffel."
+      : current.broken
+        ? `${current.spec.name} er i ustand i dag. Teknikeren kommer i morgen.`
+        : `I dag: ${current.soldToday} av ${current.spec.capacity} vafler solgt · ${current.isOpen(clock.day, clock.hourOfDay) ? "åpent nå" : `åpent ${current.spec.open[0]}–${current.spec.open[1]}${current.spec.weekendsOnly ? " i helgene" : ""}`}`;
+    const rows = KIOSK_TIERS.map((t, i) => {
+      const owned = current !== undefined && i <= current.tier;
+      const cost = t.price - paid;
+      const extras = [
+        `${t.capacity.toLocaleString("nb-NO")} vafler/dag`,
+        `${t.salePrice} kr stykket`,
+        `åpent ${t.open[0]}–${t.open[1]}${t.weekendsOnly ? ", bare i helgene" : ""}`,
+        t.dailyCost ? `strøm ${kr(t.dailyCost)}/dag` : "",
+      ].filter(Boolean).join(" · ");
+      const action = current?.tier === i
+        ? `<span class="owned">✓ Dette har dere</span>`
+        : owned
+          ? `<span class="owned">✓</span>`
+          : `<button data-buy="${i}" ${cost > budget ? "disabled" : ""}>${current ? "Oppgrader" : "Kjøp"} ${kr(cost)}</button>`;
+      return `<tr class="${current?.tier === i ? "current" : ""}"><td><strong>${t.name}</strong><br><small>${t.pitch}</small><br><small class="facts">${extras}</small></td><td>${action}</td></tr>`;
+    }).join("");
+    kioskPanel.innerHTML = `
+      <div class="head"><strong>🧇 Vaffelsalg ved garasjen til ${groomer.name}</strong><button data-k="close">✕</button></div>
+      <p class="status">${status}</p>
+      <table>${rows}</table>
+      <p class="note">Oppgradering koster mellomlegget: det dere har betalt, trekkes fra.</p>`;
+  };
+
+  kioskPanel.addEventListener("click", (e) => {
+    const button = (e.target as HTMLElement).closest("button");
+    if (!button) {
+      return;
+    }
+    if (button.dataset.k === "close") {
+      kioskPanel.hidden = true;
+      return;
+    }
+    const tier = Number(button.dataset.buy);
+    const groomer = fleet.groomers[kioskGarage];
+    if (!groomer || !Number.isFinite(tier)) {
+      return;
+    }
+    const current = kioskAt(groomer.garage.x, groomer.garage.y);
+    const cost = KIOSK_TIERS[tier].price - (current ? current.spec.price : 0);
+    if (cost > budget) {
+      return;
+    }
+    budget -= cost;
+    placeKiosk(groomer.garage.x, groomer.garage.y, tier);
+    kioskBoughtToday = KIOSK_TIERS[tier].name;
+    kioskUpgradedToday = current !== undefined;
+    showToast(tier === KIOSK_TIERS.length - 1
+      ? "🧇 <strong>Vaffel-O-Matic 3000</strong> er levert! Den surrer, blinker og lukter brunost. Naboene har spørsmål."
+      : `🧇 <strong>${KIOSK_TIERS[tier].name}</strong> er klar ved garasjen. Røren står klar.`);
+    renderKiosk();
+    refreshHud();
+  });
+
+  /** Waffle stands at day's end: the electricity bill, and whether the machinery holds up for tomorrow. */
+  const closeKiosks = () => {
+    let bill = 0;
+    for (const k of kiosks) {
+      bill += k.spec.dailyCost;
+      k.broken = Math.random() < k.spec.breakdown;
+      if (k.broken) {
+        kioskBrokenToday = true;
+        showToast(`🧇 ${k.spec.name} har satt seg fast. Røren har stivnet i dysene. Stengt i dag, teknikeren er bestilt.`);
+      }
+    }
+    budget -= bill;
+    return bill;
+  };
+
   const closeDay = (day: number) => {
     yesterdayHyped = crowd.hype;
     incidentsYesterday = incidentsToday;
@@ -344,13 +462,16 @@ async function main() {
     const happy = stats.finished > 0 ? Math.round((stats.satisfaction / stats.finished) * 100) : 0;
     const diesel = dieselToday;
     dieselToday = 0;
+    const power = closeKiosks();
     if (stats.skiers === 0 && diesel === 0) {
       return;
     }
     showToast(`<strong>${dayLabel(day)}:</strong> ${stats.skiers} skiløpere · ${happy} % fornøyde ·
       Vipps <span class="plus">+${kr(stats.donations)}</span>
       ${stats.members > 0 ? `· ${stats.members} nye medlemmer <span class="plus">+${kr(stats.members * 400)}</span>` : ""}
-      · diesel <span class="minus">−${kr(diesel)}</span>`);
+      ${stats.waffles > 0 ? `· 🧇 ${stats.waffles} vafler <span class="plus">+${kr(stats.waffleIncome)}</span>` : ""}
+      · diesel <span class="minus">−${kr(diesel)}</span>
+      ${power > 0 ? `· strøm <span class="minus">−${kr(power)}</span>` : ""}`);
   };
 
   const paper = {
@@ -395,10 +516,18 @@ async function main() {
       snow: snowToday,
       rain: rainToday,
       tiles: tracks.size,
+      waffles: stats.waffles,
+      kioskBought: kioskBoughtToday,
+      kioskUpgrade: kioskUpgradedToday,
+      kioskBroken: kioskBrokenToday,
+      kiosks: kiosks.length,
       icy: icy / n,
       bare: bare / n,
     });
     roadsToday = [];
+    kioskBoughtToday = null;
+    kioskUpgradedToday = false;
+    kioskBrokenToday = false;
     snowToday = 0;
     rainToday = 0;
     if (day + 1 >= paper.pressUntil) {
@@ -1349,6 +1478,7 @@ async function main() {
       help.hidden = true;
       showReport(false);
       showPaper(false);
+      kioskPanel.hidden = true;
     } else {
       const t = ({ Digit1: "look", Digit2: "build", Digit3: "remove", Digit4: "garage" } as Record<string, Tool>)[e.code];
       if (!t) {
@@ -1381,6 +1511,7 @@ async function main() {
     weather: { snowDepth: weather.snowDepth, plans: weather.allPlans() },
     tracks: encodeTracks(map, tracks),
     garages: fleet.groomers.map((g) => ({ tile: map.toGrid(g.garage.x, g.garage.y), totalGroomed: g.totalGroomed })),
+    kiosks: kiosks.map((k) => ({ tile: map.toGrid(k.x, k.y), tier: k.tier, soldToday: k.soldToday, broken: k.broken })),
     schedule: fleet.schedule,
     reports: reports.map(({ report, rosy }) => ({ ...report, rosyChosen: rosy })),
     crew: map.toGrid(crew.x, crew.y),
@@ -1395,7 +1526,7 @@ async function main() {
     clock.paused = true;
     budget = save.budget;
     crowd.reputation = save.reputation;
-    crowd.today = { ...save.today };
+    crowd.today = { ...emptyDay(), ...save.today };
     crowd.hype = save.hype;
     yesterday = save.yesterday;
     yesterdayHyped = save.yesterdayHyped;
@@ -1414,6 +1545,14 @@ async function main() {
       }
     }
     fleet.schedule = save.schedule;
+    for (const saved of save.kiosks ?? []) {
+      const local = map.fromGrid(saved.tile);
+      if (local && fleet.garages.some((g) => g.x === local[0] && g.y === local[1])) {
+        const k = placeKiosk(local[0], local[1], Math.min(saved.tier, KIOSK_TIERS.length - 1));
+        k.soldToday = saved.soldToday;
+        k.broken = saved.broken;
+      }
+    }
     for (const r of save.reports) {
       reports.push({ report: { day: r.day, honest: r.honest, rosy: r.rosy, headline: r.headline as Report["headline"] }, rosy: r.rosyChosen });
     }
