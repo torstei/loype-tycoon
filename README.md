@@ -42,7 +42,9 @@ Controls (press `H` in the game for the full list):
 - **Keyboard track laying**, as in the old tycoon games: Num Lock or `T` toggles
   tråkkemodus; numpad 1–9, or Q W E / A D / Z X C on keyboards without a numpad, walk the
   track crew in eight directions, laying track when tråkkemodus is on. Backspace removes
-  the track under the crew.
+  the track under the crew. The crew follows the mouse: clicking a tile puts it there, and
+  after a drag it stands at the end of the new track, so clicking anywhere on the network
+  and walking off with the keypad makes a branch.
 - **Mouse**: left-drag paints track (tool 2) or removes it (tool 3); right-drag pans; the
   wheel steps through the zoom levels. On a touchpad, pinch zooms and two-finger scroll pans.
 - **Time**: Space pauses, `,`/`.` slow down / speed up (1×–16×; a game day is about five

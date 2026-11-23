@@ -1076,6 +1076,9 @@ async function main() {
       stroke.pop();
     }
     stroke.push({ x, y, paid });
+    if (tool !== "build" || tracks.has(x, y)) {
+      [crew.x, crew.y] = [x, y];
+    }
   };
   let panning: { x: number; y: number } | null = null;
 
@@ -1085,7 +1088,8 @@ async function main() {
     if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
       return;
     }
-    if (e.button === 0 && tool === "look") {
+    // The keyboard crew follows the mouse, so the keypad carries on from the last tile touched.
+    if (e.button === 0 && tool !== "garage") {
       [crew.x, crew.y] = tileAt(e.offsetX, e.offsetY);
     }
     if (e.button === 0 && tool === "garage") {
