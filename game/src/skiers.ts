@@ -16,8 +16,14 @@ export interface Trailhead {
   y: number;
   /** Station: skiers per train. Parking and homes: skiers per hour at a busy peak. */
   rate: number;
-  /** How far away, in tiles, a track still counts as reachable on foot. */
+  /** How far from x, y the catchment stretches, in tiles. */
   reach: number;
+  /** Neighbourhoods: how many houses, and how many of them are within walking distance of a track. */
+  houses: number;
+  served: number;
+  houseTiles: [number, number][];
+  /** Tiles where a track counts as reachable on foot. */
+  catchment: Set<number>;
   entry: [number, number] | null;
   /** Track tiles reachable from the entry. */
   network: number;
@@ -457,42 +463,162 @@ function componentOf(tracks: TrackNetwork, start: [number, number]): Set<string>
   return seen;
 }
 
-/** Stations, car parks and clusters of houses that skiers set out from. */
+/** How keen people are on an outing at this hour, before weather and reputation: 0 … 1. */
+function outing(day: number, h: number): { out: number; dark: boolean } {
+  const { sunrise, sunset } = sunTimes(day);
+  const weekend = isWeekend(day);
+  const mid = (sunrise + sunset) / 2;
+  const bell = (centre: number, half: number) => Math.max(0, 1 - Math.pow((h - centre) / half, 2));
+  const daytime = h < sunrise || h > sunset - 0.5 ? 0 : bell(mid, (sunset - sunrise) / 2) * (weekend ? 1 : 0.35);
+  // After work, and a few before it: headlamp skiing.
+  const evening = bell(18.75, 2.75) * (weekend ? 0.12 : 0.3);
+  const early = h < sunrise ? bell(7, 1.3) * (weekend ? 0 : 0.12) : 0;
+  const dark = h < sunrise || h > sunset;
+  return { out: daytime + (dark ? evening + early : 0), dark };
+}
+
+/** How far, in tiles, people walk from their door to a track. */
+export const HOMES_REACH = 12;
+/** Houses this close, in tiles, belong to the same neighbourhood. */
+const NEIGHBOURS = 2;
+const MIN_HOUSES = 6;
+/** Peak skiers per hour from each house within walking distance of a track. */
+export const SKIERS_PER_HOUSE = 0.06;
+
+/** Every tile within r tiles of any of the given tiles. */
+function around(map: GameMap, tiles: [number, number][], r: number): Set<number> {
+  const out = new Set<number>();
+  for (const [x, y] of tiles) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy <= r * r && map.inside(x + dx, y + dy)) {
+          out.add(map.index(x + dx, y + dy));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Houses grouped into neighbourhoods: houses within a short walk of each other belong together. */
+function neighbourhoods(map: GameMap): [number, number][][] {
+  const seen = new Uint8Array(map.width * map.height);
+  const out: [number, number][][] = [];
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      if (seen[map.index(x, y)] || !map.has(x, y, Flag.Building)) {
+        continue;
+      }
+      const group: [number, number][] = [[x, y]];
+      seen[map.index(x, y)] = 1;
+      for (let i = 0; i < group.length; i++) {
+        const [gx, gy] = group[i];
+        for (let dy = -NEIGHBOURS; dy <= NEIGHBOURS; dy++) {
+          for (let dx = -NEIGHBOURS; dx <= NEIGHBOURS; dx++) {
+            const nx = gx + dx;
+            const ny = gy + dy;
+            if (map.inside(nx, ny) && !seen[map.index(nx, ny)] && map.has(nx, ny, Flag.Building)) {
+              seen[map.index(nx, ny)] = 1;
+              group.push([nx, ny]);
+            }
+          }
+        }
+      }
+      if (group.length >= MIN_HOUSES) {
+        out.push(group);
+      }
+    }
+  }
+  return out;
+}
+
+/** Steps from each tile to the nearest track, up to max; 255 beyond. */
+function walkingDistance(map: GameMap, tracks: TrackNetwork, max: number): Uint8Array {
+  const dist = new Uint8Array(map.width * map.height).fill(255);
+  let frontier: number[] = [];
+  for (const [x, y] of tracks.each()) {
+    const i = map.index(x, y);
+    dist[i] = 0;
+    frontier.push(i);
+  }
+  for (let d = 1; d <= max && frontier.length > 0; d++) {
+    const next: number[] = [];
+    for (const i of frontier) {
+      const x = i % map.width;
+      const y = (i - x) / map.width;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (map.inside(x + dx, y + dy)) {
+            const j = map.index(x + dx, y + dy);
+            if (dist[j] === 255) {
+              dist[j] = d;
+              next.push(j);
+            }
+          }
+        }
+      }
+    }
+    frontier = next;
+  }
+  return dist;
+}
+
+const COMPASS = ["øst", "sørøst", "sør", "sørvest", "vest", "nordvest", "nord", "nordøst"];
+
+/** Stations, car parks and neighbourhoods that skiers set out from. */
 export function findTrailheads(map: GameMap): Trailhead[] {
   const heads: Trailhead[] = [];
   for (const p of map.pois) {
     if (p.kind === "station") {
-      heads.push({ kind: "station", name: `${p.name} stasjon`, x: p.x, y: p.y, rate: 9, reach: 5, entry: null, network: 0, today: 0 });
+      heads.push({ kind: "station", name: `${p.name} stasjon`, x: p.x, y: p.y, rate: 9, reach: 5, houses: 0, served: 0, houseTiles: [], catchment: around(map, [[p.x, p.y]], 5), entry: null, network: 0, today: 0 });
     } else if (p.kind === "parking") {
-      heads.push({ kind: "parking", name: p.name ? `P ${p.name}` : "Parkering", x: p.x, y: p.y, rate: 8, reach: 4, entry: null, network: 0, today: 0 });
+      heads.push({ kind: "parking", name: p.name ? `P ${p.name}` : "Parkering", x: p.x, y: p.y, rate: 8, reach: 4, houses: 0, served: 0, houseTiles: [], catchment: around(map, [[p.x, p.y]], 4), entry: null, network: 0, today: 0 });
     }
   }
-  const cell = 10;
-  for (let cy = 0; cy < map.height; cy += cell) {
-    for (let cx = 0; cx < map.width; cx += cell) {
-      let n = 0;
-      let sx = 0;
-      let sy = 0;
-      for (let y = cy; y < Math.min(map.height, cy + cell); y++) {
-        for (let x = cx; x < Math.min(map.width, cx + cell); x++) {
-          if (map.has(x, y, Flag.Building)) {
-            n++;
-            sx += x;
-            sy += y;
-          }
-        }
-      }
-      if (n >= 6) {
-        const x = Math.round(sx / n);
-        const y = Math.round(sy / n);
-        const near = map.pois
-          .filter((p) => p.kind === "place" && p.name)
-          .sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0];
-        heads.push({ kind: "homes", name: near ? `boligfeltet ved ${near.name}` : "boligfeltet", x, y, rate: Math.min(6, n * 0.12), reach: 8, entry: null, network: 0, today: 0 });
-      }
+  const places = map.pois.filter((p) => p.kind === "place" && p.name);
+  const homes = neighbourhoods(map)
+    .sort((a, b) => b.length - a.length)
+    .map((houses) => {
+      const x = Math.round(houses.reduce((s, h) => s + h[0], 0) / houses.length);
+      const y = Math.round(houses.reduce((s, h) => s + h[1], 0) / houses.length);
+      const reach = Math.ceil(Math.max(...houses.map(([hx, hy]) => Math.hypot(hx - x, hy - y)))) + HOMES_REACH;
+      return { x, y, houses, reach };
+    });
+  const named = new Set<string>();
+  for (const { x, y, houses, reach } of homes) {
+    const near = places.sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0];
+    let name = near ? `boligfeltet ved ${near.name}` : "boligfeltet";
+    if (near && named.has(name)) {
+      const dir = COMPASS[Math.round(((Math.atan2(y - near.y, x - near.x) / (Math.PI * 2)) * 8 + 8)) % 8];
+      name = `husene ${dir} for ${near.name}`;
     }
+    named.add(name);
+    heads.push({
+      kind: "homes",
+      name,
+      x,
+      y,
+      rate: 0,
+      reach,
+      houses: houses.length,
+      served: 0,
+      houseTiles: houses,
+      catchment: around(map, houses, HOMES_REACH),
+      entry: null,
+      network: 0,
+      today: 0,
+    });
   }
   return heads;
+}
+
+/**
+ * How much more a network draws than a 3 km loop. Norwegians travel for long tracks, so
+ * visitors by car and train come in step with the length; locals ski from the door anyway.
+ */
+export function networkPull(kind: TrailheadKind, tiles: number, tileSize: number): number {
+  const km = (tiles * tileSize) / 1000;
+  return kind === "homes" ? 0.5 + 0.5 * Math.sqrt(km / 3) : Math.max(0.3, Math.pow(km / 3, 0.8));
 }
 
 export const MEMBERSHIP_FEE = 400;
@@ -582,28 +708,51 @@ export class Crowd {
     private readonly earn: (amount: number) => void,
   ) {
     this.trailheads = findTrailheads(map);
+    for (const h of this.trailheads) {
+      for (const i of h.catchment) {
+        const list = this.owners.get(i);
+        if (list) {
+          list.push(h);
+        } else {
+          this.owners.set(i, [h]);
+        }
+      }
+    }
   }
+  private readonly owners = new Map<number, Trailhead[]>();
 
   /** Whether any skier is within r tiles of a tile right now. */
   near(x: number, y: number, r: number): boolean {
     return this.skiers.some((s) => Math.abs(s.px - (x + 0.5)) < r && Math.abs(s.py - (y + 0.5)) < r);
   }
 
+  /** The trailheads whose catchment covers a tile. */
+  headsAt(x: number, y: number): Trailhead[] {
+    return this.map.inside(x, y) ? (this.owners.get(this.map.index(x, y)) ?? []) : [];
+  }
+
   /** Which trailheads have a track close enough to walk to, and how much track they lead to. */
   connect(tracks: TrackNetwork) {
     const sizes = new Map<string, number>();
+    const best = new Map<Trailhead, number>();
     for (const h of this.trailheads) {
       h.entry = null;
       h.network = 0;
-      let best = Infinity;
-      for (let dy = -h.reach; dy <= h.reach; dy++) {
-        for (let dx = -h.reach; dx <= h.reach; dx++) {
-          const d = Math.hypot(dx, dy);
-          if (d <= h.reach && d < best && tracks.has(h.x + dx, h.y + dy)) {
-            best = d;
-            h.entry = [h.x + dx, h.y + dy];
-          }
+    }
+    for (const [x, y] of tracks.each()) {
+      for (const h of this.headsAt(x, y)) {
+        const d = Math.hypot(x - h.x, y - h.y);
+        if (d < (best.get(h) ?? Infinity)) {
+          best.set(h, d);
+          h.entry = [x, y];
         }
+      }
+    }
+    const walk = walkingDistance(this.map, tracks, HOMES_REACH);
+    for (const h of this.trailheads) {
+      if (h.kind === "homes") {
+        h.served = h.entry ? h.houseTiles.filter(([x, y]) => walk[this.map.index(x, y)] <= HOMES_REACH).length : 0;
+        h.rate = h.served * SKIERS_PER_HOUSE;
       }
       if (h.entry) {
         const key = `${h.entry[0]},${h.entry[1]}`;
@@ -619,19 +768,9 @@ export class Crowd {
   }
 
   /** How keen people are to go skiing right now, 0 … ~3. */
-  appetite(clock: GameClock, weather: Weather, tracks: TrackNetwork): number {
+  appetite(clock: GameClock, weather: Weather): number {
     const day = clock.day;
-    const h = clock.hourOfDay;
-    const { sunrise, sunset } = sunTimes(day);
-    const weekend = isWeekend(day);
-    const mid = (sunrise + sunset) / 2;
-    const bell = (centre: number, half: number) => Math.max(0, 1 - Math.pow((h - centre) / half, 2));
-    const daytime = h < sunrise || h > sunset - 0.5 ? 0 : bell(mid, (sunset - sunrise) / 2) * (weekend ? 1 : 0.35);
-    // After work, and a few before it: headlamp skiing.
-    const evening = bell(18.75, 2.75) * (weekend ? 0.12 : 0.3);
-    const early = h < sunrise ? bell(7, 1.3) * (weekend ? 0 : 0.12) : 0;
-    const dark = h < sunrise || h > sunset;
-    const out = daytime + (dark ? evening + early : 0);
+    const { out, dark } = outing(day, clock.hourOfDay);
     this.darkShare = out > 0 ? (dark ? 1 : 0) : 0;
     let sky = 1;
     if (weather.precipRate > 0) {
@@ -642,16 +781,32 @@ export class Crowd {
     if (weather.temperature < -15) {
       sky *= 0.5;
     }
-    const km = (tracks.size * this.map.tileSize) / 1000;
-    const size = Math.min(2, 0.5 + km / 6);
-    return out * holiday(day).factor * sky * size * (0.3 + 1.4 * this.reputation) * (this.hype ? 1.25 : 1) * this.press * (1 + kioskDraw(this.kiosks));
+    return out * holiday(day).factor * sky * this.mood();
+  }
+
+  /** What the club's name and offer add to anyone's urge to go. */
+  private mood(): number {
+    return (0.3 + 1.4 * this.reputation) * (this.hype ? 1.25 : 1) * this.press * (1 + kioskDraw(this.kiosks));
+  }
+
+  /** Roughly how many would set out from a trailhead on a clear Saturday, given a network of so many tiles. */
+  fineSaturday(h: Trailhead, day: number, networkTiles: number, rate = h.rate): number {
+    let saturday = day;
+    while (!isWeekend(saturday) || !isWeekend(saturday + 1)) {
+      saturday++;
+    }
+    let sum = 0;
+    for (let hour = 0; hour < 24; hour += 0.25) {
+      sum += outing(saturday, hour).out * 0.25;
+    }
+    return rate * sum * 1.25 * this.mood() * networkPull(h.kind, networkTiles, this.map.tileSize);
   }
 
   update(hours: number, clock: GameClock, weather: Weather, tracks: TrackNetwork) {
     if (hours <= 0) {
       return;
     }
-    const appetite = this.appetite(clock, weather, tracks);
+    const appetite = this.appetite(clock, weather);
     const before = clock.hours - hours;
     const trainArrived = Math.floor(before - 0.25) !== Math.floor(clock.hours - 0.25);
     for (const h of this.trailheads) {
@@ -659,10 +814,11 @@ export class Crowd {
         continue;
       }
       let n = 0;
+      const rate = h.rate * appetite * networkPull(h.kind, h.network, this.map.tileSize);
       if (h.kind === "station") {
-        n = trainArrived ? Math.round(h.rate * appetite * (0.6 + Math.random() * 0.8)) : 0;
+        n = trainArrived ? Math.round(rate * (0.6 + Math.random() * 0.8)) : 0;
       } else {
-        const acc = (this.arrivals.get(h) ?? Math.random()) + h.rate * appetite * hours;
+        const acc = (this.arrivals.get(h) ?? Math.random()) + rate * hours;
         n = Math.floor(acc);
         this.arrivals.set(h, acc - n);
       }

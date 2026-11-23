@@ -57,7 +57,7 @@ export function accountsHtml(finished: DayAccount[], today: DayAccount, facts: A
     </table>
     <ul class="facts">
       <li>⛽ Diesel koster ${kr(facts.dieselPerKm)} per km hver gang løypa preppes: ${kr(fullGroom)} for hele nettet på ${facts.km.toFixed(1).replace(".", ",")} km.</li>
-      <li>⛷ Skiløperne kommer fra ${facts.connected} ${facts.connected === 1 ? "sted" : "steder"}: stasjoner, parkeringer og boligfelt løypa når fram til. Løype som når nye steder gir flere skiløpere; lengre og finere løyper gjør dem gladere og rausere.</li>
+      <li>⛷ Skiløperne kommer fra ${facts.connected} ${facts.connected === 1 ? "sted" : "steder"}: stasjoner, parkeringer og boligfelt løypa når fram til. Hvert hus innen 300 m fra løypa gir skiløpere, og et lengre løypenett lokker flere, særlig dem som kommer med tog og bil.</li>
       ${perSkier > 0 ? `<li>📱 Hver skiløper har gitt ${perSkier.toFixed(2).replace(".", ",")} kr i snitt i Vipps og medlemskap denne sesongen.</li>` : ""}
       ${net < 0 && finished.length >= 7 ? `<li class="warn">Driften går i minus. Vafler er den sikreste inntekten: en vaffelbu ved garasjen eller ei hytte langs løypa.</li>` : ""}
     </ul>`;
