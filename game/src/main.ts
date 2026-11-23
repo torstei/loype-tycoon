@@ -70,6 +70,8 @@ const PAN_KEYS: Record<string, [number, number]> = {
 };
 
 const START_BUDGET = 150_000;
+/** How far from the network a drag may start and still be linked up automatically, in tiles. */
+const CONNECT_REACH = 3;
 const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
 
 async function main() {
@@ -119,6 +121,7 @@ async function main() {
   const skijorer = new Skijorer(map);
   world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, fleet.machineLayer, crowd.layer, skijorer.layer);
   const cursor = new Graphics();
+  const endsLayer = new Graphics();
   world.addChild(cursor);
   const whimsy = new Whimsy(map);
   world.addChild(whimsy.layer);
@@ -128,6 +131,7 @@ async function main() {
   const labels = new Container();
   world.addChild(labels);
   const signs = addPoiLabels(map, labels);
+  world.addChild(endsLayer);
   const night = new Graphics();
   const lightsWorld = new Container();
   lightsWorld.addChild(crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
@@ -233,6 +237,7 @@ async function main() {
     }
     whimsy.update(dt, { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y });
     crew.update(dt);
+    drawEnds(dt);
     const kind = weather.precipRate <= 0 ? "none" : weather.temperature < 0.8 ? "snow" : "rain";
     precipitation.update(dt, app.screen.width, app.screen.height, kind, weather.precipRate / 1.5);
   });
@@ -613,6 +618,7 @@ async function main() {
 
   const redrawTracks = () => {
     refreshTrailheads();
+    trackEnds = [...tracks.each()].filter(([x, y]) => tracks.neighbours(x, y).length <= 1);
     trackLayer.clear();
     const { lines, dots } = tracks.segments();
     if (groomMap) {
@@ -755,7 +761,8 @@ async function main() {
     const i = map.index(x, y);
     const obstacle = tracks.obstacle(x, y);
     const detached = cost !== null && !tracks.has(x, y) ? connectionProblem(x, y) : null;
-    let action = detached
+    const link = detached && tool === "build" ? connector(x, y) : null;
+    let action = detached && !link
       ? `<span class="minus">${detached}</span>`
       : cost === null
       ? "Kan ikke bygge her"
@@ -766,6 +773,9 @@ async function main() {
           : map.has(x, y, Flag.Passage) && (map.has(x, y, Flag.Rail) || map.has(x, y, Flag.Road))
             ? `Eksisterende bru/undergang: ${kr(cost)}`
             : `Bygge løype: ${kr(cost)}`;
+    if (link) {
+      action += `<br>Kobles til løypenettet med ${link.length} rute${link.length === 1 ? "" : "r"} til`;
+    }
     if (tracks.has(x, y)) {
       const since = clock.hours - tracks.groomedAt[i];
       const groomed = Number.isFinite(since) ? `preppet for ${since < 1 ? "under en time" : `${Math.floor(since)} t`} siden` : "aldri preppet";
@@ -790,7 +800,7 @@ async function main() {
       ${elevation} moh · stigning ${map.slopeAt(x, y).toFixed(0)} % ·
       ${weather.localTemperature(elevation).toFixed(0)} °C · snø ${weather.snowDepthAt(elevation).toFixed(0)} cm<br>
       ${action}${headLine}`;
-    const blocked = cost === null || (!tracks.has(x, y) && connectionProblem(x, y) !== null);
+    const blocked = cost === null || (!tracks.has(x, y) && connectionProblem(x, y) !== null && !link);
     cursor.clear().rect(x * PX, y * PX, PX, PX).stroke({ width: 2, color: blocked ? 0xc0392b : 0x1f5fd1 });
   };
 
@@ -842,6 +852,78 @@ async function main() {
     }
     redrawTracks();
     refreshHud();
+  };
+
+  /** Where new track can carry on from: loose ends and lone tiles, or the garage before any track. */
+  let trackEnds: [number, number][] = [];
+  let hint: { from: [number, number]; to: [number, number]; ttl: number } | null = null;
+
+  /** The track tile, or the garage while there is no track, closest to a tile. */
+  const nearestAnchor = (x: number, y: number): [number, number] | null => {
+    const candidates: [number, number][] = tracks.size > 0 ? [...tracks.each()] : fleet.garages.map((g) => [g.x, g.y]);
+    let best: [number, number] | null = null;
+    let bestD = Infinity;
+    for (const [cx, cy] of candidates) {
+      const d = Math.hypot(cx - x, cy - y);
+      if (d < bestD) {
+        bestD = d;
+        best = [cx, cy];
+      }
+    }
+    return best;
+  };
+
+  /**
+   * A short straight link from the network to a tile a few steps away, so a drag started just
+   * beside the track still grows out of it. Null if too far, or if the link meets a road,
+   * railway or anything unbuildable: those deserve a deliberate stroke.
+   */
+  const connector = (x: number, y: number): [number, number][] | null => {
+    const anchor = nearestAnchor(x, y);
+    if (!anchor || fleet.garages.length === 0) {
+      return null;
+    }
+    const reach = tracks.size > 0 ? CONNECT_REACH : CONNECT_REACH + GARAGE_REACH;
+    if (Math.max(Math.abs(anchor[0] - x), Math.abs(anchor[1] - y)) > reach) {
+      return null;
+    }
+    const path = [...lineTiles(anchor[0], anchor[1], x, y)].slice(1, -1);
+    const ok = path.every(([px, py]) => tracks.has(px, py) || (tracks.cost(px, py) !== null && !tracks.obstacle(px, py)));
+    return ok ? path : null;
+  };
+
+  const drawEnds = (dt: number) => {
+    endsLayer.clear();
+    if (hint) {
+      hint.ttl -= dt;
+      const [fx, fy] = hint.from;
+      const [tx, ty] = hint.to;
+      const a = Math.min(1, hint.ttl);
+      endsLayer
+        .moveTo((fx + 0.5) * PX, (fy + 0.5) * PX)
+        .lineTo((tx + 0.5) * PX, (ty + 0.5) * PX)
+        .stroke({ width: 3 / camera.scale, color: 0xe8591a, alpha: a * 0.9 })
+        .circle((tx + 0.5) * PX, (ty + 0.5) * PX, 12 / camera.scale)
+        .stroke({ width: 3 / camera.scale, color: 0xe8591a, alpha: a });
+      if (hint.ttl <= 0) {
+        hint = null;
+      }
+    }
+    if (tool !== "build" || tracks.size === 0) {
+      return;
+    }
+    const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 260);
+    const r = (6 + 3 * pulse) / camera.scale;
+    for (const [x, y] of trackEnds) {
+      const cx = (x + 0.5) * PX;
+      const cy = (y + 0.5) * PX;
+      endsLayer
+        .circle(cx, cy, r)
+        .fill({ color: 0xffffff, alpha: 0.85 })
+        .stroke({ width: 2.5 / camera.scale, color: 0x1f5fd1 })
+        .circle(cx, cy, 3 / camera.scale)
+        .fill(0x1f5fd1);
+    }
   };
 
   const connectionProblem = (x: number, y: number): string | null => {
@@ -971,6 +1053,23 @@ async function main() {
       painting = tileAt(e.offsetX, e.offsetY);
       stroke = [];
       strokeCrossing = null;
+      const [px, py] = painting;
+      if (tool === "build" && !tracks.has(px, py) && tracks.cost(px, py) !== null && connectionProblem(px, py) && fleet.garages.length > 0) {
+        const link = connector(px, py);
+        if (link) {
+          for (const [lx, ly] of link) {
+            paintStep(lx, ly);
+          }
+        } else {
+          const anchor = nearestAnchor(px, py);
+          if (anchor) {
+            hint = { from: [px, py], to: anchor, ttl: 3 };
+            showToast(`${connectionProblem(px, py)}. ${tracks.size > 0 ? "Nærmeste løype er markert — start draget derfra." : "Garasjen er markert."}`);
+          }
+          painting = null;
+          return;
+        }
+      }
       paintStep(...painting);
       redrawTracks();
       refreshHud();
