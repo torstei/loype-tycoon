@@ -3,6 +3,22 @@ import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, GameClock, SPEEDS } from "./clock";
 import { Fleet, GARAGE_REACH } from "./groomer";
 import { Report, writeReport } from "./report";
+import {
+  decodeTracks,
+  deleteSlot,
+  download,
+  encodeTracks,
+  readSlot,
+  SAVE_FORMAT,
+  SAVE_VERSION,
+  SaveGame,
+  setBoot,
+  Slot,
+  SLOTS,
+  takeBoot,
+  validate,
+  writeSlot,
+} from "./savegame";
 import { Skijorer } from "./skijor";
 import { Crowd, DayStats } from "./skiers";
 import { TrackCrew } from "./crew";
@@ -173,6 +189,7 @@ async function main() {
     if (clock.day !== forecastDay) {
       if (forecastDay >= 0) {
         closeDay(forecastDay);
+        autosave();
       }
       forecastDay = clock.day;
       refreshForecast();
@@ -1007,6 +1024,8 @@ async function main() {
       toggleGroomMap();
     } else if ((e.code === "Enter" || e.code === "NumpadEnter") && tool === "garage") {
       placeGarage(crew.x, crew.y);
+    } else if (e.code === "KeyM") {
+      toggleMenu();
     } else if (e.code === "KeyF") {
       showReport(reportPanel.hidden);
     } else if (e.code === "KeyH" || e.key === "?") {
@@ -1023,6 +1042,200 @@ async function main() {
     }
     e.preventDefault();
   });
+
+  const snapshot = (): SaveGame => ({
+    format: SAVE_FORMAT,
+    version: SAVE_VERSION,
+    savedAt: new Date().toISOString(),
+    label: `${clock.label()} · ${((tracks.size * map.tileSize) / 1000).toFixed(1)} km · ${kr(budget)}`,
+    map: { name: map.name, title: map.title, version: map.version, grid: map.grid },
+    clock: { hours: clock.hours, speedIndex: clock.speedIndex },
+    budget,
+    reputation: crowd.reputation,
+    today: { ...crowd.today },
+    hype: crowd.hype,
+    yesterday,
+    yesterdayHyped,
+    dieselToday,
+    incidentsToday,
+    incidentsYesterday,
+    lastReportDay,
+    snowSinceReport,
+    rainSinceReport,
+    weather: { snowDepth: weather.snowDepth, plans: weather.allPlans() },
+    tracks: encodeTracks(map, tracks),
+    garages: fleet.groomers.map((g) => ({ tile: map.toGrid(g.garage.x, g.garage.y), totalGroomed: g.totalGroomed })),
+    schedule: fleet.schedule,
+    reports: reports.map(({ report, rosy }) => ({ ...report, rosyChosen: rosy })),
+    crew: map.toGrid(crew.x, crew.y),
+  });
+
+  /** Rebuild a saved game on this freshly started page. Returns what to tell the player. */
+  const restore = (save: SaveGame): string => {
+    clock.hours = save.clock.hours;
+    clock.speedIndex = save.clock.speedIndex;
+    clock.paused = true;
+    budget = save.budget;
+    crowd.reputation = save.reputation;
+    crowd.today = { ...save.today };
+    crowd.hype = save.hype;
+    yesterday = save.yesterday;
+    yesterdayHyped = save.yesterdayHyped;
+    dieselToday = save.dieselToday;
+    incidentsToday = [...save.incidentsToday];
+    incidentsYesterday = [...save.incidentsYesterday];
+    lastReportDay = save.lastReportDay;
+    snowSinceReport = save.snowSinceReport;
+    rainSinceReport = save.rainSinceReport;
+    weather.restore(save.weather.plans, save.weather.snowDepth, clock.hours);
+    const result = decodeTracks(map, tracks, save.tracks);
+    for (const g of save.garages) {
+      const local = map.fromGrid(g.tile);
+      if (local) {
+        fleet.place(...local).totalGroomed = g.totalGroomed;
+      }
+    }
+    fleet.schedule = save.schedule;
+    for (const r of save.reports) {
+      reports.push({ report: { day: r.day, honest: r.honest, rosy: r.rosy, headline: r.headline as Report["headline"] }, rosy: r.rosyChosen });
+    }
+    reportIndex = reports.length - 1;
+    const crewAt = map.fromGrid(save.crew);
+    if (crewAt) {
+      [crew.x, crew.y] = crewAt;
+    }
+    forecastDay = clock.day;
+    refreshForecast();
+    document.getElementById("setup")!.hidden = fleet.garages.length > 0;
+    setTool(fleet.garages.length > 0 ? "look" : "garage");
+    camera.centreOn((crew.x + 0.5) * PX, (crew.y + 0.5) * PX, app.screen.width, app.screen.height);
+    const changed = save.map.version !== map.version;
+    const notes = [];
+    if (result.dropped > 0) {
+      notes.push(`${result.dropped} løyperuter passet ikke lenger og ble fjernet`);
+    }
+    if (result.changed > 0) {
+      notes.push(`${result.changed} kryssinger ble endret`);
+    }
+    return changed
+      ? `Kartet er oppdatert siden spillet ble lagret${notes.length ? `: ${notes.join(", ")}` : ", men alt passet"}.`
+      : "";
+  };
+
+  let leaving = false;
+  const autosave = () => {
+    if (!leaving && fleet.garages.length > 0) {
+      writeSlot("auto", snapshot());
+    }
+  };
+  window.addEventListener("pagehide", autosave);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      autosave();
+    }
+  });
+
+  const menu = document.getElementById("game-menu")!;
+  const slotName = (slot: Slot) => (slot === "auto" ? "Autolagring" : `Plass ${slot}`);
+  const renderMenu = () => {
+    const rows = SLOTS.map((slot) => {
+      const save = readSlot(slot);
+      const when = save ? new Date(save.savedAt).toLocaleString("nb-NO", { dateStyle: "short", timeStyle: "short" }) : "";
+      return `<tr>
+        <th>${slotName(slot)}</th>
+        <td>${save ? `${save.label}<br><small>lagret ${when}</small>` : "<small>tom</small>"}</td>
+        <td>${slot === "auto" ? "" : `<button data-save="${slot}">Lagre</button>`}
+          ${save ? `<button data-load="${slot}">Last inn</button>` : ""}</td>
+      </tr>`;
+    }).join("");
+    menu.innerHTML = `
+      <div class="head"><strong>💾 Spill</strong><button data-menu="close">✕</button></div>
+      <table>${rows}</table>
+      <div class="actions">
+        <button data-menu="export">Lagre til fil</button>
+        <button data-menu="import">Hent fra fil</button>
+        <button data-menu="new" class="danger">Nytt spill</button>
+      </div>
+      <input type="file" accept=".json,application/json" hidden>
+      <p class="note"></p>`;
+  };
+  const note = (text: string) => {
+    menu.querySelector(".note")!.textContent = text;
+  };
+  const toggleMenu = (open = menu.hidden) => {
+    menu.hidden = !open;
+    if (open) {
+      renderMenu();
+    }
+  };
+  const reload = () => {
+    leaving = true;
+    location.reload();
+  };
+  menu.addEventListener("click", (e) => {
+    const button = (e.target as HTMLElement).closest("button");
+    if (!button) {
+      return;
+    }
+    const { save: saveTo, load, menu: action } = button.dataset;
+    if (saveTo) {
+      const ok = writeSlot(saveTo as Slot, snapshot());
+      renderMenu();
+      note(ok ? `Lagret på ${slotName(saveTo as Slot).toLowerCase()}.` : "Klarte ikke å lagre: nettleseren tillater ikke lagring.");
+    } else if (load) {
+      autosave();
+      setBoot({ kind: "slot", slot: load as Slot });
+      reload();
+    } else if (action === "close") {
+      toggleMenu(false);
+    } else if (action === "export") {
+      download(snapshot());
+    } else if (action === "import") {
+      menu.querySelector<HTMLInputElement>("input[type=file]")!.click();
+    } else if (action === "new") {
+      if (confirm("Starte et nytt spill? Det som ikke er lagret på en egen plass eller til fil, blir borte.")) {
+        deleteSlot("auto");
+        setBoot({ kind: "new" });
+        reload();
+      }
+    }
+  });
+  menu.addEventListener("change", async (e) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const data = JSON.parse(await file.text());
+      const problem = validate(data, map);
+      if (problem) {
+        note(problem);
+        return;
+      }
+      autosave();
+      setBoot({ kind: "file", save: data as SaveGame });
+      reload();
+    } catch {
+      note("Klarte ikke å lese filen.");
+    } finally {
+      input.value = "";
+    }
+  });
+  document.getElementById("menu-button")!.addEventListener("click", () => toggleMenu());
+
+  // Pick up where we left off: an explicit load or new game, otherwise the autosave.
+  const boot = takeBoot();
+  const saved = boot?.kind === "new" ? null : boot?.kind === "file" ? boot.save : readSlot(boot?.kind === "slot" ? boot.slot : "auto");
+  if (saved) {
+    const problem = validate(saved, map);
+    if (problem) {
+      showToast(`Kunne ikke laste spillet: ${problem}`);
+    } else {
+      const message = restore(saved);
+      showToast(`💾 Fortsetter spillet fra ${saved.label.split(" · ")[0]}. ${message} Mellomrom starter tiden.`);
+    }
+  }
 
   redrawTracks();
   refreshHud();

@@ -84,6 +84,21 @@ swings, snow and rain, and a snowpack that is deeper higher up. Each track tile 
 how fresh it is, how much new snow lies in it and how icy it is; tracks are drawn by
 condition, from crisp blue corduroy to worn, snowed-in, icy or bare.
 
+## Saving
+
+The game saves in the browser (localStorage); nothing leaves the player's machine. It
+autosaves every game midnight and whenever the tab is closed or hidden, and continues from
+the autosave next time the page opens. The 💾 Spill menu (`M`) has three save slots, export
+to and import from a JSON file, and a new game.
+
+Saves refer to tiles by their position on the global grid, never by array index. A save
+records the map's name and content fingerprint; loading it into a regenerated or extended
+version of the same map lays the track back by grid position, drops tiles that no longer fit
+(off the map, under a new building, across a railway with no way under) and adjusts
+crossings to what is there now, then says what changed. Saves from another map, from a newer
+format or with another grid size are refused. Skiers out on a trip, moose and the train are
+not saved.
+
 Append `?debug` to the URL to expose the game state as `window.loype` for poking at
 from the browser console or a test script.
 

@@ -85,6 +85,20 @@ export class Weather {
     };
   }
 
+  /** The whole season's weather, for a saved game: the rest of the season stays as it was. */
+  allPlans(): DayPlan[] {
+    return this.plans.map((p) => ({ ...p }));
+  }
+
+  /** Take over a saved season's weather and snowpack at an absolute game hour. */
+  restore(plans: DayPlan[], snowDepth: number, now: number) {
+    this.plans.splice(0, this.plans.length, ...plans.map((p) => ({ ...p })));
+    this.snowDepth = snowDepth;
+    this.temperature = this.temperatureAt(now);
+    this.precipRate = this.precipRateAt(now);
+    this.wind = this.plan(Math.floor(now / 24)).wind;
+  }
+
   plan(day: number): DayPlan {
     return this.plans[Math.min(this.plans.length - 1, Math.max(0, day))];
   }

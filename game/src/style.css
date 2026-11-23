@@ -104,3 +104,19 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #setup strong { display: block; font-size: 16px; margin-bottom: 4px; }
 #setup.nudge { animation: nudge 0.4s; }
 @keyframes nudge { 0%, 100% { transform: translateX(-50%); } 25% { transform: translateX(calc(-50% - 8px)); } 75% { transform: translateX(calc(-50% + 8px)); } }
+#game-menu { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px));
+  padding: 12px 16px; background: #fffdf6; border: 3px solid #23323d; border-radius: 10px; z-index: 8;
+  box-shadow: 0 12px 40px rgba(10, 20, 40, 0.4); font-size: 14px; }
+#game-menu[hidden] { display: none; }
+#game-menu .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 16px; }
+#game-menu table { width: 100%; border-collapse: collapse; }
+#game-menu th { text-align: left; padding: 6px 10px 6px 0; white-space: nowrap; vertical-align: top; }
+#game-menu td { padding: 6px 0; vertical-align: top; }
+#game-menu td:last-child { text-align: right; white-space: nowrap; }
+#game-menu tr + tr { border-top: 1px solid #e2e7ee; }
+#game-menu small { color: #6a7884; }
+#game-menu button { font: inherit; font-size: 13px; padding: 3px 10px; border: 1px solid #9aa8b2; background: #fff; border-radius: 4px; cursor: pointer; margin-left: 4px; }
+#game-menu .head button { border: none; font-size: 18px; }
+#game-menu .actions { display: flex; gap: 6px; margin-top: 10px; }
+#game-menu .actions .danger { margin-left: auto; color: #c0392b; border-color: #c0392b; }
+#game-menu .note { margin: 8px 0 0; color: #1f5fd1; min-height: 1em; }
