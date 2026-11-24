@@ -58,7 +58,8 @@ Controls (press `H` in the game for the full list):
 - **Mouse**: left-drag paints track (tool 2) or removes it (tool 3); right-drag pans; the
   wheel steps through the zoom levels. On a touchpad, pinch zooms and two-finger scroll pans.
 - **Time**: Space pauses, `,`/`.` slow down / speed up (1×–16×; a game day is about five
-  minutes at 1×). The season runs from 1 December to 31 March.
+  minutes at 1×). A season starts on 1 December and lasts until the snow is gone from the
+  tracks (see [Seasons](#seasons)).
 - **Crossings**: when a track reaches a road, a dialog offers a level crossing (cheap, but
   skiers have to take their skis off and the snowcat cannot groom asphalt), a culvert or a
   bridge. How much it matters depends on the road: crossing a quiet local road on the level
@@ -110,7 +111,9 @@ Early in the morning and late in the evening, a red-bearded man skijors through 
 with his two huskies, Manu and Nanook. Click them.
 
 Weather is generated per season: temperature with a seasonal curve, fronts and daily
-swings, snow and rain, and a snowpack that is deeper higher up. Each track tile tracks
+swings, snow and rain. Two snowpacks, one on the valley floor and one at the height of
+Varingskollen, set the snow depth at every height: higher up it is colder, so more snow falls
+and it melts later. From March the spring sun melts snow even on frosty days. Each track tile tracks
 how fresh it is, how much new snow lies in it and how icy it is; tracks are drawn by
 condition, from crisp blue corduroy to worn, snowed-in, icy or bare.
 
@@ -156,6 +159,22 @@ A house in Hadelandsveien is a local landmark for its Christmas lights, and Vari
 it every December. In the game its roof, garden, tree and reindeer twinkle after dark from the
 start of the season until Tjugendedag (13 January), when the lights come down. Varingen covers
 the lighting-up, the slow traffic on RV4 past the house and the dark after Tjugendedag.
+
+### Seasons
+
+From 1 March, the season ends on the first night when hardly any track has snow left to ski on,
+and on 31 May at the latest. A valley-floor network usually closes in early April; track on high
+ground, or a snowy winter, can last into May. Varingen then prints a season edition: the winter in
+numbers, the best and worst front pages, and a goodbye to the snow. Next comes the club's annual
+meeting, with the year's report, the accounts, a vote on letting the board off the hook (easy
+after a good winter, a long debate after a poor one), a prize and any other business.
+
+Summer is a summary. Some members renew, depending on how happy skiers were over the winter, and
+the grassroots share comes in. Then the club pays for snowcat service, insurance and clearing
+the tracks, at half price if the dugnad turns up. The next winter starts on 1 December with
+the network, snowcats, waffle stands, cabins and chair-lift carried over. It brings new weather,
+milder or colder than normal, its own calendar of weekdays, winter break and Easter, and an
+empty account.
 
 ### Grooming and the tiller
 

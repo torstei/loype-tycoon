@@ -1,6 +1,7 @@
 import { Grid, GameMap, GridTile } from "./map";
 import { DayStats } from "./skiers";
 import { Crossing, TrackNetwork } from "./tracks";
+import { SeasonSummary, Summer } from "./season";
 import { DayNews, Edition } from "./varingen";
 import { DayPlan } from "./weather";
 
@@ -8,7 +9,7 @@ export const SAVE_FORMAT = "loype-tycoon-save";
 export const SAVE_VERSION = 1;
 
 /** One finished day's numbers. */
-export type AccountRow = { day: number; skiers: number; happy: number | null; donations: number; members: number; waffles: number; waffleIncome: number; diesel: number; power: number; guests: number; rooms: number; budget: number; reputation: number; tiles: number; built: number };
+export type AccountRow = { day: number; skiers: number; happy: number | null; donations: number; members: number; waffles: number; waffleIncome: number; diesel: number; power: number; guests: number; rooms: number; budget: number; reputation: number; tiles: number; built: number; snow?: number; groomed?: number };
 
 export type Slot = "auto" | "1" | "2" | "3";
 export const SLOTS: Slot[] = ["auto", "1", "2", "3"];
@@ -47,7 +48,7 @@ export interface SaveGame {
   lastReportDay: number;
   snowSinceReport: number;
   rainSinceReport: number;
-  weather: { snowDepth: number; plans: DayPlan[] };
+  weather: { snowDepth: number; highDepth?: number; plans: DayPlan[] };
   tracks: TrackRecord[];
   garages: { tile: GridTile; totalGroomed: number }[];
   schedule: "night" | "always";
@@ -57,6 +58,18 @@ export interface SaveGame {
   kiosks?: { tile: GridTile; tier: number; soldToday: number; broken: boolean; experts?: boolean; kind?: "stand" | "cabin"; name?: string | null }[];
   /** Absent in saves from before the ski lifts were drawn. */
   alpine?: { chairlift: boolean };
+  /** Absent in saves from the first winter, before seasons ended. */
+  season?: {
+    year: number;
+    /** Club members carried into this winter from the last. */
+    members: number;
+    kmStart: number;
+    startBudget: number;
+    past: SeasonSummary[];
+    /** Set once the snow is gone: the meeting and the summer are still to come. */
+    ended?: SeasonSummary;
+    summer?: Summer;
+  };
   /** Absent in saves from before the account existed. */
   accounts?: { history: AccountRow[]; dayStartBudget: number };
   /** Absent in saves from before the paper existed. */
