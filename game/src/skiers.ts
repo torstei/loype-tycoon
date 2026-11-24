@@ -7,7 +7,7 @@ import { Crossing, RAIL_LEVEL_CROSSING, roadTraffic, TrackNetwork } from "./trac
 import { coldAppetite, Kiosk, KIOSK_REACH, kioskDraw } from "./kiosk";
 import { Weather } from "./weather";
 
-export type TrailheadKind = "station" | "parking" | "homes";
+export type TrailheadKind = "station" | "parking" | "homes" | "lift";
 
 export interface Trailhead {
   kind: TrailheadKind;
@@ -486,7 +486,7 @@ const MIN_HOUSES = 6;
 export const SKIERS_PER_HOUSE = 0.06;
 
 /** Every tile in the square reaching r tiles out from any of the given tiles. */
-function around(map: GameMap, tiles: [number, number][], r: number): Set<number> {
+export function around(map: GameMap, tiles: [number, number][], r: number): Set<number> {
   const out = new Set<number>();
   for (const [x, y] of tiles) {
     for (let dy = -r; dy <= r; dy++) {
@@ -671,7 +671,7 @@ export interface DayStats {
 export class Crowd {
   readonly layer = new Container();
   readonly bubbles = new Container();
-  readonly trailheads: Trailhead[];
+  readonly trailheads: Trailhead[] = [];
   readonly skiers: Skier[] = [];
   /** 0 … 1: what people say about the club's tracks. */
   reputation = 0.5;
@@ -710,24 +710,33 @@ export class Crowd {
     private readonly map: GameMap,
     private readonly earn: (amount: number) => void,
   ) {
-    this.trailheads = findTrailheads(map);
-    for (const h of this.trailheads) {
-      for (const i of h.catchment) {
-        const list = this.owners.get(i);
-        if (list) {
-          list.push(h);
-        } else {
-          this.owners.set(i, [h]);
-        }
-      }
+    for (const h of findTrailheads(map)) {
+      this.addTrailhead(h);
     }
   }
-  private readonly owners = new Map<number, Trailhead[]>();
 
   /** Whether any skier is within r tiles of a tile right now. */
   near(x: number, y: number, r: number): boolean {
     return this.skiers.some((s) => Math.abs(s.px - (x + 0.5)) < r && Math.abs(s.py - (y + 0.5)) < r);
   }
+
+  private readonly owners = new Map<number, Trailhead[]>();
+
+  /** A trailhead that opens during the game, such as the chair-lift's top station. */
+  addTrailhead(h: Trailhead) {
+    this.trailheads.push(h);
+    for (const i of h.catchment) {
+      const list = this.owners.get(i);
+      if (list) {
+        list.push(h);
+      } else {
+        this.owners.set(i, [h]);
+      }
+    }
+  }
+
+  /** The chair-lift is running, so skiers can arrive at its top station. */
+  liftRunning = false;
 
   /** The trailheads whose catchment covers a tile. */
   headsAt(x: number, y: number): Trailhead[] {
@@ -813,7 +822,7 @@ export class Crowd {
     const before = clock.hours - hours;
     const trainArrived = Math.floor(before - 0.25) !== Math.floor(clock.hours - 0.25);
     for (const h of this.trailheads) {
-      if (!h.entry || appetite <= 0) {
+      if (!h.entry || appetite <= 0 || (h.kind === "lift" && !this.liftRunning)) {
         continue;
       }
       let n = 0;

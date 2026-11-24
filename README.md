@@ -138,6 +138,25 @@ happier and more generous.
   lørdag"). A planned route shows the zone it adds in yellow, with a yellow dot on each house it
   brings in and the count in the plan ("+252 hus innen 300 m").
 
+### Varingskollen
+
+The alpine slopes and lifts come from OpenStreetMap: the slopes drawn as groomed strips, the lifts
+with cable, pylons and stations. Alpine skiers ride up and ski down when the slopes are open
+(weekday evenings 17–21 and weekend days 10–16, when there is snow), under floodlights on the lit
+slopes after dark. After dark the villages light up too: most houses leave the outside light
+on, and street lights line RV4 and the other main roads, and smaller roads where people live.
+Clicking a lift (or a lift station with the build tool) shows it. The longest
+lift, Olaheisen, can become a chair-lift if the club chips in 400 000 kr: its top station then becomes
+a trailhead, and while the lifts run, cross-country skiers ride up and set off from track laid there,
+on the high ground where the snow comes first and stays longest.
+
+### The Christmas house
+
+A house in Hadelandsveien is a local landmark for its Christmas lights, and Varingen writes about
+it every December. In the game its roof, garden, tree and reindeer twinkle after dark from the
+start of the season until Tjugendedag (13 January), when the lights come down. Varingen covers
+the lighting-up, the slow traffic on RV4 past the house and the dark after Tjugendedag.
+
 ### Grooming and the tiller
 
 The snowcat grooms at about 8 km/h, and grooms whatever needs it within its shift. Icy track is milled

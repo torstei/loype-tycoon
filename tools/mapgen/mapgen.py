@@ -150,6 +150,18 @@ def cabin_query(bbox_ll):
 out center tags;"""
 
 
+def alpine_query(bbox_ll):
+    """Ski lifts and downhill slopes."""
+    s, w, n, e = bbox_ll
+    bb = f"({s},{w},{n},{e})"
+    return f"""[out:json][timeout:120];
+(
+  way["aerialway"]{bb};
+  way["piste:type"="downhill"]{bb};
+);
+out geom;"""
+
+
 def fetch_osm(region, bbox_ll, query_fn=None, suffix="osm"):
     path = CACHE / f"{region.cache_key}-{suffix}.json"
     if path.exists():
@@ -465,6 +477,39 @@ def cabin_pois(region, data):
     return out
 
 
+LIFTS = {"t-bar", "j-bar", "platter", "drag_lift", "rope_tow", "magic_carpet", "chair_lift", "gondola", "mixed_lift"}
+
+
+def alpine_features(region, data):
+    """Lifts and downhill slopes as polylines in tile units; a slope drawn as an area keeps its outline."""
+    to_utm = Transformer.from_crs("EPSG:4326", CRS, always_xy=True).transform
+
+    def tile_pts(geometry):
+        out = []
+        for p in geometry:
+            x, y = to_utm(p["lon"], p["lat"])
+            out.append([round((x - region.min_x) / region.tile_m, 2), round((region.max_y - y) / region.tile_m, 2)])
+        return out
+
+    lifts, slopes = [], []
+    for el in data["elements"]:
+        tags = el.get("tags", {})
+        geometry = el.get("geometry") or []
+        if el["type"] != "way" or len(geometry) < 2:
+            continue
+        pts = tile_pts(geometry)
+        if not any(0 <= x < region.cols and 0 <= y < region.rows for x, y in pts):
+            continue
+        if tags.get("disused") == "yes":
+            continue
+        if tags.get("aerialway") in LIFTS:
+            lifts.append({"kind": tags["aerialway"], "name": tags.get("name"), "pts": pts})
+        elif tags.get("piste:type") == "downhill":
+            closed = geometry[0] == geometry[-1] and len(geometry) > 3
+            slopes.append({"name": tags.get("name"), "lit": tags.get("lit") == "yes", "area": closed, "pts": pts})
+    return {"lifts": lifts, "slopes": slopes}
+
+
 def bbox_latlon(region):
     to_ll = Transformer.from_crs(CRS, "EPSG:4326", always_xy=True).transform
     xs = [region.min_x, region.max_x]
@@ -525,6 +570,7 @@ def main():
     print(f"{region.title}: {region.cols}x{region.rows} tiles of {GRID_M} m", file=sys.stderr)
     osm = fetch_osm(region, bbox_latlon(region))
     cabins = fetch_osm(region, bbox_latlon(region), cabin_query, "cabins")
+    alpine = fetch_osm(region, bbox_latlon(region), alpine_query, "alpine")
     elev = fetch_dtm(region)
     terrain, flags, pois, lines = build_layers(region, osm)
     pois += cabin_pois(region, cabins)
@@ -543,6 +589,7 @@ def main():
         "elevation": np.round(elev).astype(int).ravel().tolist(),
         "pois": pois,
         "lines": lines,
+        "alpine": alpine_features(region, alpine),
         "attribution": "© OpenStreetMap contributors (ODbL); elevation © Kartverket (CC BY 4.0)",
     }
     (args.out / f"{region.name}.json").write_text(json.dumps(doc, separators=(",", ":")))

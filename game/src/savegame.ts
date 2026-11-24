@@ -55,6 +55,8 @@ export interface SaveGame {
   crew: GridTile;
   /** Absent in saves from before waffle stands existed. */
   kiosks?: { tile: GridTile; tier: number; soldToday: number; broken: boolean; experts?: boolean; kind?: "stand" | "cabin"; name?: string | null }[];
+  /** Absent in saves from before the ski lifts were drawn. */
+  alpine?: { chairlift: boolean };
   /** Absent in saves from before the account existed. */
   accounts?: { history: AccountRow[]; dayStartBudget: number };
   /** Absent in saves from before the paper existed. */

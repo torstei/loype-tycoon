@@ -25,6 +25,7 @@ export interface DayNews {
   kioskBought?: string | null;
   kioskUpgrade?: boolean;
   expertsHired?: boolean;
+  chairlift?: string | null;
   cabinClaimed?: string | null;
   cabinBuilt?: string | null;
   guests?: number;
@@ -308,6 +309,53 @@ function stories(input: EditionInput): Story[] {
       headline: `${guests} overnattinger på hytta denne uka`,
       lead: "Folk kommer på ski med sekk og sovepose og blir til frokost.",
       body: [],
+    });
+  }
+  if (day >= 7 && day <= 13) {
+    out.push({
+      score: 8,
+      tone: 1,
+      kicker: "Julestemning",
+      headline: "Julehuset i Hadelandsveien har tent lysene",
+      lead: "Også i år lyser det i Hadelandsveien. Taket, hagen, grantreet og et reinsdyr på plenen: alt blinker.",
+      body: [
+        `– Vi kjører forbi hver kveld bare for å se. Ungene nekter å legge seg før vi har vært der, sier ${person(seed + 51, NORTH)}.`,
+        "– Hvor mange lys? Jeg har sluttet å telle, sier huseieren beskjedent. – Strømregningen teller for meg.",
+      ],
+    });
+  }
+  if (day >= 14 && day <= 20) {
+    out.push({
+      score: 4,
+      tone: 0,
+      kicker: "Trafikk",
+      headline: "Saktekjøring forbi julehuset",
+      lead: "Bilistene på riksvei 4 sakker ned i Hadelandsveien for å se på julelysene. Politiet ber folk heller stoppe på en lomme.",
+      body: [],
+    });
+  }
+  if (day > 43 && day <= 50) {
+    out.push({
+      score: 3,
+      tone: 0,
+      kicker: "Tjugendedag",
+      headline: "Mørkt i Hadelandsveien",
+      lead: "Tjugendedag knut jager jula ut: julelysene i Hadelandsveien er tatt ned for i år. Reinsdyret er satt på låven.",
+      body: [],
+    });
+  }
+  const chairlift = week.find((d) => d.chairlift)?.chairlift;
+  if (chairlift) {
+    out.push({
+      score: 9,
+      tone: 1,
+      kicker: "Endelig",
+      headline: "Stolheis i Varingskollen!",
+      lead: `Etter år med prat går det stoler opp ${chairlift}. Løypelaget har spleiset, og nå tar langrennsfolk også heisen til topps.`,
+      body: [
+        `– Jeg har stått i T-krok i førti år. Nå sitter jeg. Det føles nesten som juks, sier ${person(seed + 41, NORTH)}.`,
+        "– Oppe på toppen ligger snøen lenge etter at den har regnet bort i dalen. Det er der løypene bør gå, sier løypelagets leder.",
+      ],
     });
   }
   if (week.some((d) => d.expertsHired)) {
