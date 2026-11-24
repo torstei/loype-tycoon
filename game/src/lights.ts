@@ -3,8 +3,8 @@ import { GameMap } from "./map";
 import { hash, housePosition, PX } from "./render";
 import { Flag, Terrain } from "./terrain";
 
-/** Street lights stand about every 50 m. */
-const LAMP_SPACING = 2;
+/** Tiles between street lights: every 50 m on the main roads, sparser on village roads. */
+const LAMP_SPACING = [6, 6, 4, 2];
 /** Most Norwegians leave the outside light on; a few do not. */
 const LIT_HOUSES = 0.8;
 const WARM = 0xffd98a;
@@ -12,14 +12,11 @@ const WARM = 0xffd98a;
 const builtUp = (map: GameMap, x: number, y: number) => {
   const tx = Math.floor(x);
   const ty = Math.floor(y);
-  if (!map.inside(tx, ty)) {
+  if (!map.inside(tx, ty) || map.terrainAt(tx, ty) !== Terrain.Built) {
     return false;
   }
-  if (map.terrainAt(tx, ty) === Terrain.Built) {
-    return true;
-  }
-  for (let dy = -2; dy <= 2; dy++) {
-    for (let dx = -2; dx <= 2; dx++) {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
       if (map.inside(tx + dx, ty + dy) && map.has(tx + dx, ty + dy, Flag.Building)) {
         return true;
       }
@@ -34,11 +31,14 @@ const builtUp = (map: GameMap, x: number, y: number) => {
  */
 export function nightLights(map: GameMap): Graphics {
   const lamps: [number, number, number][] = [];
+  const heads: { x: number; y: number; nx: number; ny: number }[] = [];
   for (const line of map.lines) {
     if (line.kind !== "road_name") {
       continue;
     }
-    const main = (line.traffic ?? 1) >= 3;
+    const traffic = line.traffic ?? 1;
+    const main = traffic >= 3;
+    const spacing = LAMP_SPACING[traffic];
     let carry = 0;
     for (let i = 1; i < line.pts.length; i++) {
       const [ax, ay] = line.pts[i - 1];
@@ -49,15 +49,17 @@ export function nightLights(map: GameMap): Graphics {
       }
       const nx = -(by - ay) / len;
       const ny = (bx - ax) / len;
-      for (let d = carry; d < len; d += LAMP_SPACING) {
-        const x = ax + ((bx - ax) * d) / len + nx * 0.45;
-        const y = ay + ((by - ay) * d) / len + ny * 0.45;
-        if (main || builtUp(map, x, y)) {
-          lamps.push([x * PX, y * PX, 1.4]);
+      for (let d = carry; d < len; d += spacing) {
+        const x = ax + ((bx - ax) * d) / len;
+        const y = ay + ((by - ay) * d) / len;
+        if (main) {
+          heads.push({ x: (x + nx * 0.3) * PX, y: (y + ny * 0.3) * PX, nx, ny });
+        } else if (builtUp(map, x + nx * 0.45, y + ny * 0.45)) {
+          lamps.push([(x + nx * 0.45) * PX, (y + ny * 0.45) * PX, 1.1]);
         }
       }
-      carry = (carry - len) % LAMP_SPACING;
-      carry = carry < 0 ? carry + LAMP_SPACING : carry;
+      carry = (carry - len) % spacing;
+      carry = carry < 0 ? carry + spacing : carry;
     }
   }
   for (let ty = 0; ty < map.height; ty++) {
@@ -79,6 +81,24 @@ export function nightLights(map: GameMap): Graphics {
     g.circle(x, y, 1.2 * k);
   }
   g.fill({ color: 0xfff6d8, alpha: 0.95 });
+  for (const [r, a] of [[PX * 0.8, 0.09], [PX * 0.45, 0.14]]) {
+    for (const h of heads) {
+      g.circle(h.x - h.nx * 5, h.y - h.ny * 5, r);
+    }
+    g.fill({ color: WARM, alpha: a });
+  }
+  for (const h of heads) {
+    g.circle(h.x - h.nx * 4.5, h.y - h.ny * 4.5, 3);
+  }
+  g.fill({ color: 0xfff1c8, alpha: 0.45 });
+  for (const h of heads) {
+    g.moveTo(h.x + h.nx * 5, h.y + h.ny * 5).lineTo(h.x, h.y);
+  }
+  g.stroke({ color: 0x3a4048, width: 1, cap: "round" });
+  for (const h of heads) {
+    g.moveTo(h.x + h.nx * 0.5, h.y + h.ny * 0.5).lineTo(h.x - h.nx * 2, h.y - h.ny * 2);
+  }
+  g.stroke({ color: 0x2b3038, width: 2.4, cap: "round" });
   g.alpha = 0;
   return g;
 }
