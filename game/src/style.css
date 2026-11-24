@@ -265,6 +265,10 @@ html.compact #tools #tool-menu-button { background: #1f5fd1; color: #fff; border
 #build-plan button { flex: 1; font: inherit; font-weight: 700; padding: 10px; border-radius: 10px; border: 2px solid #2fa84f;
   background: #fff; color: #1f6f36; cursor: pointer; }
 #build-plan button[data-plan="build"], #build-plan button[data-plan="place"] { background: #2fa84f; color: #fff; }
+html:not(.compact) #build-plan { left: 50%; right: auto; transform: translateX(-50%); width: min(560px, calc(100vw - 16px));
+  box-sizing: border-box; }
+html:not(.compact) #build-plan .actions { justify-content: flex-end; }
+html:not(.compact) #build-plan button { flex: 0 0 auto; padding: 7px 18px; }
 html.touch .menu [data-tool="look"] { display: none; }
 #toast button.read { font: inherit; font-weight: 700; margin-left: 6px; padding: 3px 10px; border-radius: 8px;
   border: 2px solid #23323d; background: #23323d; color: #fff; cursor: pointer; }

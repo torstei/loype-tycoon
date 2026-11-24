@@ -34,6 +34,7 @@ import { landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
 import { Flag, FLAG_NAMES, Terrain, TERRAIN_NAMES } from "./terrain";
 import { askCrossing } from "./crossing";
+import { findRoute, RouteGround } from "./route";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
 import { Precipitation, Whimsy } from "./whimsy";
@@ -98,7 +99,7 @@ const AUTO_OPEN = "loype-tycoon:auto-open:";
 const COMPACT_INFO_MS = 5000;
 /** How far a finger may move, in screen pixels, and still count as a tap. */
 const TOUCH_SLOP = 14;
-/** A tap lays a straight line from the crew up to this many tiles away. */
+/** A tap or click plans a route from the network up to this many tiles away. */
 const TAP_REACH = 30;
 /** A stroke this short when a second finger lands was the start of a pinch, not a track. */
 const SHORT_STROKE = 3;
@@ -1785,7 +1786,7 @@ async function main() {
   /** A finger that has touched down with a building tool but not yet tapped, dragged or pinched. */
   let pendingTouch: { sx: number; sy: number; tile: [number, number] } | null = null;
 
-  /** Start a stroke on a tile: linked to the network if it starts just beside it, refused with a pointer if too far. */
+  /** Start a stroke on a tile: linked to the network if it starts just beside it, a planned route if further, refused with a pointer if too far. */
   const beginStroke = (px: number, py: number): boolean => {
     painting = [px, py];
     stroke = [];
@@ -1799,6 +1800,11 @@ async function main() {
         }
       } else {
         const anchor = nearestAnchor(px, py);
+        if (anchor && Math.max(Math.abs(anchor[0] - px), Math.abs(anchor[1] - py)) <= TAP_REACH) {
+          painting = null;
+          showPlan(anchor, planRoute(anchor, px, py));
+          return false;
+        }
         if (anchor) {
           hint = { from: [px, py], to: anchor, ttl: 3 };
           showToast(`${connectionProblem(px, py)}. ${tracks.size > 0 ? "Nærmeste løype er markert — start derfra." : "Garasjen er markert."}`);
@@ -1815,7 +1821,7 @@ async function main() {
 
   /**
    * A tap with a finger. Building: on track it picks where to carry on from; elsewhere it lays a
-   * straight line from the crew, when the crew stands on track close enough, or starts a stroke there.
+   * planned route from the crew, when the crew stands on track close enough, or starts a stroke there.
    */
   const tapTile = (tx: number, ty: number) => {
     if (tool === "garage") {
@@ -1888,26 +1894,37 @@ async function main() {
   const planPanel = document.getElementById("build-plan")!;
   const setupPanel = document.getElementById("setup")!;
 
-  /** What a straight line of track from a tile to another would meet, stopping at the first tile it cannot cross. */
+  /** The cheapest price of laying track on a tile, crossings included, or null where track cannot go. */
+  const tilePrice = (x: number, y: number): number | null => {
+    const ground = tracks.cost(x, y);
+    const obstacle = ground === null ? null : tracks.obstacle(x, y);
+    if (ground === null || !obstacle) {
+      return ground;
+    }
+    return ground + Math.min(...crossingOptions(obstacle, tracks.traffic(x, y), tracks.levelCrossing(x, y)).map((o) => o.price));
+  };
+
+  /** Following the network costs next to nothing, so a route uses it rather than doubling it. */
+  const routeGround: RouteGround = {
+    width: map.width,
+    height: map.height,
+    step: (x, y) => (tracks.has(x, y) ? 1 : tilePrice(x, y)),
+    wall: (x, y) => !tracks.has(x, y) && (tracks.cost(x, y) === null || tracks.obstacle(x, y) !== null),
+  };
+
+  /** The cheapest way to lay track from a tile to another, around houses, steep ground and costly crossings. */
   const planRoute = (from: [number, number], tx: number, ty: number): PlanTile[] => {
-    const out: PlanTile[] = [];
-    for (const [x, y] of [...lineTiles(from[0], from[1], tx, ty)].slice(1)) {
+    const route = findRoute(routeGround, from, [tx, ty]);
+    const out: PlanTile[] = route.tiles.map(([x, y]) => {
       if (tracks.has(x, y)) {
-        out.push({ x, y, kind: "track", price: 0 });
-        continue;
+        return { x, y, kind: "track", price: 0 };
       }
-      const ground = tracks.cost(x, y);
-      if (ground === null) {
-        out.push({ x, y, kind: "blocked", price: 0, reason: tracks.blockReason(x, y) ?? "Kan ikke bygge her" });
-        break;
-      }
-      const obstacle = tracks.obstacle(x, y);
-      if (obstacle) {
-        const cheapest = Math.min(...crossingOptions(obstacle, tracks.traffic(x, y), tracks.levelCrossing(x, y)).map((o) => o.price));
-        out.push({ x, y, kind: "crossing", price: ground + cheapest });
-      } else {
-        out.push({ x, y, kind: tracks.passageOnRoad(x, y) ? "crossing" : "new", price: ground });
-      }
+      const kind = tracks.obstacle(x, y) || tracks.passageOnRoad(x, y) ? "crossing" : "new";
+      return { x, y, kind, price: tilePrice(x, y)! };
+    });
+    if (!route.complete) {
+      const reason = tracks.cost(tx, ty) === null ? tracks.blockReason(tx, ty) ?? "Kan ikke bygge her" : "Finner ingen vei rundt det som er i veien";
+      out.push({ x: tx, y: ty, kind: "blocked", price: 0, reason });
     }
     return out;
   };
@@ -1919,12 +1936,13 @@ async function main() {
     plan = tiles;
     planLayer.clear();
     const [fx, fy] = from;
-    const end = tiles.at(-1);
-    if (end) {
-      planLayer
-        .moveTo((fx + 0.5) * PX, (fy + 0.5) * PX)
-        .lineTo((end.x + 0.5) * PX, (end.y + 0.5) * PX)
-        .stroke({ width: 3, color: 0x23323d, alpha: 0.5 });
+    const path = tiles.filter((t) => t.kind !== "blocked");
+    if (path.length > 0) {
+      planLayer.moveTo((fx + 0.5) * PX, (fy + 0.5) * PX);
+      for (const t of path) {
+        planLayer.lineTo((t.x + 0.5) * PX, (t.y + 0.5) * PX);
+      }
+      planLayer.stroke({ width: 3, color: 0x23323d, alpha: 0.5, join: "round" });
     }
     for (const t of tiles) {
       if (t.kind === "blocked") {
