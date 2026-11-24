@@ -174,23 +174,30 @@ def fetch_osm(region, bbox_ll, query_fn=None, suffix="osm"):
     sys.exit("overpass: every endpoint failed; try again later")
 
 
+DTM_OVERSAMPLE = 4
+
+
 def fetch_dtm(region):
-    path = CACHE / f"{region.cache_key}-dtm.tif"
+    """Elevation per tile, averaged from a finer grid: the WCS samples 25 m cells coarsely,
+    leaving terraces that read as cliffs."""
+    k = DTM_OVERSAMPLE
+    path = CACHE / f"{region.cache_key}-dtm-x{k}.tif"
     if not path.exists():
         params = {
             "service": "WCS", "version": "1.0.0", "request": "GetCoverage",
             "coverage": "nhm_dtm_topo_25833", "crs": CRS, "format": "GeoTIFF",
             "bbox": f"{region.min_x},{region.min_y},{region.max_x},{region.max_y}",
-            "width": region.cols, "height": region.rows,
+            "width": region.cols * k, "height": region.rows * k,
         }
         print("  kartverket: DTM", file=sys.stderr)
-        r = requests.get(DTM_WCS, params=params, headers={"User-Agent": USER_AGENT}, timeout=120)
+        r = requests.get(DTM_WCS, params=params, headers={"User-Agent": USER_AGENT}, timeout=300)
         r.raise_for_status()
         if not r.headers.get("content-type", "").startswith("image/tiff"):
             sys.exit(f"kartverket: unexpected response {r.headers.get('content-type')}")
         path.write_bytes(r.content)
     with rasterio.open(path) as src:
-        return src.read(1).astype(np.float32)
+        fine = src.read(1).astype(np.float32)
+    return fine.reshape(region.rows, k, region.cols, k).mean(axis=(1, 3))
 
 
 def way_line(el):
