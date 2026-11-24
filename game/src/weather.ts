@@ -1,9 +1,11 @@
-import { SEASON_DAYS } from "./clock";
+import { MAX_SEASON_DAYS } from "./clock";
 
 /** Elevation the weather figures refer to; the valley floor at Hakadal. */
 export const REFERENCE_ELEVATION = 200;
 const LAPSE_RATE = 0.0065;
-const SNOW_PER_METRE = 0.05;
+/** The second snowpack, about the height of Varingskollen: colder, so more snow and a later melt. */
+export const HIGH_ELEVATION = 500;
+const HIGH_START_EXTRA = 15;
 
 export interface DayPlan {
   /** Daily mean temperature at the reference elevation. */
@@ -34,9 +36,29 @@ function rng(seed: number) {
   };
 }
 
-/** Climatological mean for the day: coldest around 20 January. */
+/** Climatological mean for the day: coldest around 20 January, then spring through April and May. */
 function normalMean(day: number): number {
-  return -1.5 - 5 * Math.sin(Math.PI * Math.min(1, Math.max(0, (day + 8) / 128)));
+  return -1.5 - 5 * Math.sin(Math.PI * Math.min(1, Math.max(0, (day + 8) / 128))) + Math.max(0, day - 120) * 0.19;
+}
+
+const spring = (day: number) => Math.min(1, Math.max(0, (day - 80) / 50));
+
+/** One step of a snowpack at temperature `temp` with `p` mm falling; `sun` is 0–1 for a clear spring midday. */
+function settle(depth: number, temp: number, p: number, dt: number, day: number, sun: number): number {
+  let d = depth;
+  if (temp < 0.8) {
+    d += p;
+  } else {
+    d -= p * 0.3;
+  }
+  if (temp > 0) {
+    d -= temp * (0.04 + 0.08 * spring(day)) * dt;
+  }
+  if (temp > -5) {
+    d -= sun * 0.6 * spring(day) * dt;
+  }
+  d -= d * 0.0008 * dt;
+  return Math.max(0, d);
 }
 
 const FORECASTERS = [
@@ -50,6 +72,8 @@ const FORECASTERS = [
 export class Weather {
   /** Snow depth at the reference elevation, cm. */
   snowDepth: number;
+  /** Snow depth at HIGH_ELEVATION, cm. */
+  highDepth: number;
   temperature = 0;
   /** mm/h falling right now; negative never. */
   precipRate = 0;
@@ -64,7 +88,8 @@ export class Weather {
   ) {
     this.random = rng(seed);
     this.snowDepth = 20 + this.random() * 15;
-    for (let d = 0; d < SEASON_DAYS + 5; d++) {
+    this.highDepth = this.snowDepth + HIGH_START_EXTRA;
+    for (let d = 0; d < MAX_SEASON_DAYS + 5; d++) {
       this.plans.push(this.planDay(d));
     }
   }
@@ -91,9 +116,10 @@ export class Weather {
   }
 
   /** Take over a saved season's weather and snowpack at an absolute game hour. */
-  restore(plans: DayPlan[], snowDepth: number, now: number) {
+  restore(plans: DayPlan[], snowDepth: number, now: number, highDepth = snowDepth + HIGH_START_EXTRA) {
     this.plans.splice(0, this.plans.length, ...plans.map((p) => ({ ...p })));
     this.snowDepth = snowDepth;
+    this.highDepth = highDepth;
     this.temperature = this.temperatureAt(now);
     this.precipRate = this.precipRateAt(now);
     this.wind = this.plan(Math.floor(now / 24)).wind;
@@ -129,7 +155,8 @@ export class Weather {
   }
 
   snowDepthAt(elevation: number): number {
-    return Math.max(0, this.snowDepth + (elevation - REFERENCE_ELEVATION) * SNOW_PER_METRE);
+    const k = (elevation - REFERENCE_ELEVATION) / (HIGH_ELEVATION - REFERENCE_ELEVATION);
+    return Math.max(0, this.snowDepth + (this.highDepth - this.snowDepth) * k);
   }
 
   /** Advance the snowpack. Returns snowfall (cm) and rain (mm) at the reference elevation. */
@@ -141,19 +168,18 @@ export class Weather {
     for (let i = 0; i < steps; i++) {
       const t = fromHours + i * dt;
       const temp = this.temperatureAt(t);
-      const p = this.precipRateAt(t) * dt;
+      const rate = this.precipRateAt(t);
+      const p = rate * dt;
       if (temp < 0.8) {
         snow += p;
-        this.snowDepth += p;
       } else {
         rain += p;
-        this.snowDepth -= p * 0.3;
       }
-      if (temp > 0) {
-        this.snowDepth -= temp * 0.04 * dt;
-      }
-      this.snowDepth -= this.snowDepth * 0.0004 * dt;
-      this.snowDepth = Math.max(0, this.snowDepth);
+      const h = t % 24;
+      const sun = rate > 0 ? 0 : Math.max(0, Math.sin(((h - 7) / 12) * Math.PI));
+      const day = Math.floor(t / 24);
+      this.snowDepth = settle(this.snowDepth, temp, p, dt, day, sun);
+      this.highDepth = settle(this.highDepth, temp - (HIGH_ELEVATION - REFERENCE_ELEVATION) * LAPSE_RATE, p, dt, day, sun);
     }
     const now = fromHours + hours;
     this.temperature = this.temperatureAt(now);

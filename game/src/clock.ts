@@ -2,12 +2,78 @@
 const SECONDS_PER_HOUR = 12;
 
 export const SPEEDS = [1, 2, 4, 8, 16];
-export const SEASON_DAYS = 121;
+/** 1 December to 31 May: no winter in Hakadal lasts longer, even up at Varingskollen. */
+export const MAX_SEASON_DAYS = 182;
+/** Before 1 March a thaw is only a thaw; after it, snow gone from the tracks ends the season. */
+export const EARLIEST_SEASON_END = 90;
 
 const WEEKDAYS = ["søn", "man", "tir", "ons", "tor", "fre", "lør"];
-const MONTHS: [string, number][] = [["des", 31], ["jan", 31], ["feb", 28], ["mar", 31]];
-// 1 December 2026 is a Tuesday.
-const FIRST_WEEKDAY = 2;
+
+/** The calendar of the winter that starts on 1 December of `year`. */
+interface SeasonCalendar {
+  year: number;
+  firstWeekday: number;
+  months: [string, number][];
+  winterBreak: number;
+  easter: number;
+}
+
+const DAY_MS = 86_400_000;
+const sinceDecember = (year: number, date: Date) => Math.round((date.getTime() - Date.UTC(year, 11, 1)) / DAY_MS);
+
+function easterSunday(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+/** Monday of ISO week `week`. */
+function isoWeekMonday(year: number, week: number): Date {
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const monday = jan4.getTime() - ((jan4.getUTCDay() + 6) % 7) * DAY_MS;
+  return new Date(monday + (week - 1) * 7 * DAY_MS);
+}
+
+function calendarFor(year: number): SeasonCalendar {
+  const next = year + 1;
+  const leap = (next % 4 === 0 && next % 100 !== 0) || next % 400 === 0;
+  return {
+    year,
+    firstWeekday: new Date(Date.UTC(year, 11, 1)).getUTCDay(),
+    months: [["des", 31], ["jan", 31], ["feb", leap ? 29 : 28], ["mar", 31], ["apr", 30], ["mai", 31]],
+    winterBreak: sinceDecember(year, isoWeekMonday(next, 8)),
+    easter: sinceDecember(year, easterSunday(next)),
+  };
+}
+
+export const FIRST_SEASON = 2026;
+let cal = calendarFor(FIRST_SEASON);
+
+/** Switch every date in the game to the winter starting 1 December `year`. */
+export function setSeason(year: number) {
+  cal = calendarFor(year);
+}
+
+/** "2026/27" */
+export function seasonName(year = cal.year): string {
+  return `${year}/${String((year + 1) % 100).padStart(2, "0")}`;
+}
+
+export function seasonYear(): number {
+  return cal.year;
+}
 
 export class GameClock {
   /** Hours since 00:00 on 1 December. */
@@ -27,8 +93,11 @@ export class GameClock {
     return this.hours % 24;
   }
 
+  /** Set when the snow is gone from the tracks; time stands still until the next season. */
+  ended = false;
+
   get seasonOver(): boolean {
-    return this.day >= SEASON_DAYS;
+    return this.ended || this.day >= MAX_SEASON_DAYS;
   }
 
   /** Advance by real seconds; returns the game hours that passed. */
@@ -59,24 +128,25 @@ export class GameClock {
 
 export function dayLabel(day: number): string {
   let rest = day;
-  for (const [name, length] of MONTHS) {
+  for (const [name, length] of cal.months) {
     if (rest < length) {
-      return `${WEEKDAYS[(FIRST_WEEKDAY + day) % 7]} ${rest + 1}. ${name}`;
+      return `${weekday(day)} ${rest + 1}. ${name}`;
     }
     rest -= length;
   }
-  return "april";
+  return "juni";
 }
 
 export function weekday(day: number): string {
-  return WEEKDAYS[(FIRST_WEEKDAY + day) % 7];
+  return WEEKDAYS[(cal.firstWeekday + day) % 7];
 }
 
-/** Sunrise and sunset near Oslo, from the winter solstice (day 20) towards the end of March. */
+/** Sunrise and sunset near Oslo, from the winter solstice (day 20) into May. */
 export function sunTimes(day: number): { sunrise: number; sunset: number } {
   const fromSolstice = Math.min(1, Math.max(0, Math.abs(day - 20) / 100));
   const k = (1 - Math.cos(Math.PI * fromSolstice)) / 2;
-  return { sunrise: 9.3 - k * 3.1, sunset: 15.3 + k * 3.7 };
+  const spring = Math.max(0, day - 120);
+  return { sunrise: 9.3 - k * 3.1 - spring * 0.03, sunset: 15.3 + k * 3.7 + spring * 0.04 };
 }
 
 /** How much busier than a normal day of that weekday: holidays and the odd local custom. */
@@ -84,16 +154,16 @@ export function holiday(day: number): { factor: number; name: string | null } {
   if (day >= 23 && day <= 31) {
     return { factor: 1.8, name: "juleferie" };
   }
-  if (day >= 81 && day <= 89) {
+  if (day >= cal.winterBreak - 2 && day <= cal.winterBreak + 6) {
     return { factor: 2, name: "vinterferie" };
   }
-  if (day >= 110 && day <= 118) {
+  if (day >= cal.easter - 7 && day <= cal.easter + 1) {
     return { factor: 0.7, name: "påske (alle er på fjellet)" };
   }
   return { factor: 1, name: null };
 }
 
 export function isWeekend(day: number): boolean {
-  const d = (FIRST_WEEKDAY + day) % 7;
+  const d = (cal.firstWeekday + day) % 7;
   return d === 0 || d === 6;
 }

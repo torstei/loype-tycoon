@@ -1,6 +1,7 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { Camera, OVERVIEW_BELOW } from "./camera";
-import { dayLabel, GameClock, holiday, isWeekend, SPEEDS, weekday } from "./clock";
+import { dayLabel, EARLIEST_SEASON_END, FIRST_SEASON, GameClock, holiday, isWeekend, MAX_SEASON_DAYS, seasonName, setSeason, SPEEDS, weekday } from "./clock";
+import { meetingHtml, rating, seasonEdition, SeasonSummary, settleSummer, Summer, summarise, summerHtml } from "./season";
 import { COST_PER_TILE, Fleet, GARAGE_REACH } from "./groomer";
 import { accountsHtml, DayAccount } from "./accounts";
 import { areas, Report, writeReport } from "./report";
@@ -38,7 +39,7 @@ import { Alpine, CHAIRLIFT_PRICE } from "./alpine";
 import { nightLights } from "./lights";
 import { Julehus, LIGHTS_DOWN_DAY } from "./christmas";
 import { findRoute, RouteGround } from "./route";
-import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
+import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, MIN_GROOMING_DEPTH, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
 import { Precipitation, Whimsy } from "./whimsy";
 import "./style.css";
@@ -252,6 +253,9 @@ async function main() {
 
   /** The day's fixed points: the morning report, Thursday's paper, and closing the books at midnight. */
   const calendar = () => {
+    if (clock.ended) {
+      return;
+    }
     if (clock.day > lastReportDay && clock.hourOfDay >= 7 && clock.hourOfDay < 12 && tracks.size > 0) {
       lastReportDay = clock.day;
       publishReport();
@@ -262,6 +266,10 @@ async function main() {
     if (clock.day !== forecastDay) {
       if (forecastDay >= 0) {
         closeDay(forecastDay);
+        if (snowGone(forecastDay)) {
+          endSeason(forecastDay);
+          return;
+        }
         if (!fastForwarding) {
           autosave();
         }
@@ -281,6 +289,7 @@ async function main() {
     refreshTrailheads();
     claimCabins();
     const wasPaused = clock.paused;
+    const wasEnded = clock.ended;
     clock.paused = true;
     timeStarted = true;
     let left = hours;
@@ -291,8 +300,11 @@ async function main() {
       calendar();
       left -= h;
     }
-    clock.paused = wasPaused;
+    clock.paused = wasPaused || clock.ended;
     fastForwarding = false;
+    if (clock.ended && !wasEnded) {
+      announceSeasonEnd();
+    }
     redrawTracks();
     refreshHud();
     return history;
@@ -940,6 +952,7 @@ async function main() {
     const stats = crowd.endDay();
     yesterday = stats;
     const { bill: power, guests, rooms } = closeKiosks(day);
+    const snowFell = snowToday;
     logNews(day, stats, guests);
     const happy = stats.finished > 0 ? Math.round((stats.satisfaction / stats.finished) * 100) : 0;
     const diesel = dieselToday;
@@ -959,6 +972,8 @@ async function main() {
       budget,
       reputation: crowd.reputation,
       tiles: tracks.size,
+      snow: snowFell,
+      groomed: paper.week.at(-1)?.groomed ?? 0,
       built: builtSince(dayStartBudget, stats.donations + stats.members * MEMBERSHIP_FEE + stats.waffleIncome + rooms, diesel + power),
     });
     dayStartBudget = budget;
@@ -1009,6 +1024,15 @@ async function main() {
     bestWeek: 0,
     lastDay: -1,
     pressUntil: -1,
+  };
+  const season = {
+    year: FIRST_SEASON,
+    members: 0,
+    kmStart: 0,
+    startBudget: START_BUDGET,
+    past: [] as SeasonSummary[],
+    ended: undefined as SeasonSummary | undefined,
+    summer: undefined as Summer | undefined,
   };
   let editionIndex = -1;
   const paperPanel = document.getElementById("paper")!;
@@ -1142,9 +1166,16 @@ async function main() {
     if (toggleAutoOpen(e)) {
       return;
     }
+    if ((e.target as HTMLElement).closest("[data-open='meeting']")) {
+      showSeason("meeting");
+      return;
+    }
     const action = (e.target as HTMLElement).closest("button")?.dataset.p;
     if (action === "close") {
       showPaper(false);
+      if (season.ended && seasonPanel.hidden) {
+        showSeason(season.summer ? "summer" : "meeting");
+      }
       return;
     }
     if (action === "prev") {
@@ -1155,6 +1186,127 @@ async function main() {
     renderPaper();
   });
   paperButton.addEventListener("click", () => showPaper(paperPanel.hidden));
+
+  /** The winter is over when, from March on, hardly any of the track has snow left to ski on. */
+  const snowGone = (day: number): boolean => {
+    if (day >= MAX_SEASON_DAYS - 1) {
+      return true;
+    }
+    if (day < EARLIEST_SEASON_END) {
+      return false;
+    }
+    const skiable = (x: number, y: number) => weather.snowDepthAt(map.elevationAt(x, y)) >= MIN_GROOMING_DEPTH * 0.6;
+    if (tracks.size === 0) {
+      return !skiable(startPoi.x, startPoi.y);
+    }
+    let left = 0;
+    for (const [x, y] of tracks.each()) {
+      left += skiable(x, y) ? 1 : 0;
+    }
+    return left < tracks.size * 0.05;
+  };
+
+  const seasonPanel = document.getElementById("season")!;
+  const endSeason = (day: number) => {
+    clock.ended = true;
+    clock.paused = true;
+    const summary = summarise({
+      year: season.year,
+      number: season.past.length + 1,
+      endDay: day,
+      history,
+      carriedMembers: season.members,
+      startBudget: season.startBudget,
+      budget,
+      km: trackKm(),
+      kmStart: season.kmStart,
+      reputation: crowd.reputation,
+      editions: paper.editions,
+      chairlift: alpine.hasChairlift,
+      kiosks: kiosks.filter((k) => k.kind === "stand").length,
+      cabins: kiosks.filter((k) => k.kind === "cabin").length,
+    });
+    season.ended = summary;
+    paper.editions.push(seasonEdition(summary, paper.editions.length + 1));
+    paper.lastDay = day;
+    editionIndex = paper.editions.length - 1;
+    if (!fastForwarding) {
+      announceSeasonEnd();
+    }
+  };
+
+  const announceSeasonEnd = () => {
+    autosave();
+    showPaper(true);
+    showToast("🏁 <strong>Sesongen er over!</strong> Snøen er borte fra løypene. Les sesongavisa, så er det årsmøte.", 12000);
+  };
+
+  const showSeason = (step: "meeting" | "summer") => {
+    const summary = season.ended!;
+    if (step === "summer" && !season.summer) {
+      season.summer = settleSummer(summary, fleet.groomers.length);
+      autosave();
+    }
+    seasonPanel.innerHTML = step === "meeting" ? meetingHtml(summary) : summerHtml(summary, season.summer!, summary.year + 1);
+    seasonPanel.hidden = false;
+    seasonPanel.scrollTop = 0;
+    showPaper(false);
+  };
+
+  /** How much milder or colder than normal a winter is; the first one is a normal winter. */
+  const winterShift = (year: number) => {
+    if (year === FIRST_SEASON) {
+      return 0;
+    }
+    const r = Math.sin(year * 12.9898) * 43758.5453;
+    return (r - Math.floor(r) - 0.5) * 3;
+  };
+
+  /** Carry the club into next winter: the network and buildings stay, the snow, the week and the books start over. */
+  const startNextSeason = () => {
+    const summary = season.ended!;
+    const summer = season.summer!;
+    const year = summary.year + 1;
+    const base = snapshot();
+    const fresh = new Weather(year, winterShift(year));
+    const km = trackKm();
+    const next: SaveGame = {
+      ...base,
+      label: `${seasonName(year)} · ny sesong · ${km.toFixed(1)} km · ${kr(summer.budget)}`,
+      clock: { hours: 20, speedIndex: base.clock.speedIndex },
+      budget: summer.budget,
+      reputation: 0.5 + (rating(summary) - 0.5) * 0.7,
+      today: emptyDay(),
+      hype: false,
+      yesterday: null,
+      yesterdayHyped: false,
+      dieselToday: 0,
+      incidentsToday: [],
+      incidentsYesterday: [],
+      lastReportDay: -1,
+      snowSinceReport: 0,
+      rainSinceReport: 0,
+      weather: { snowDepth: fresh.snowDepth, highDepth: fresh.highDepth, plans: fresh.allPlans() },
+      tracks: base.tracks.map(([col, row, , , , , , , crossing]) => [col, row, 0, 0, 0, 0, null, null, crossing, 0]),
+      kiosks: base.kiosks?.map((k) => ({ ...k, soldToday: 0, broken: false })),
+      reports: [],
+      varingen: { ...base.varingen!, editions: [], week: [], kmAtLastEdition: km, lastDay: -1, pressUntil: -1, press: 1, roadsToday: [], snowToday: 0, rainToday: 0 },
+      accounts: { history: [], dayStartBudget: summer.budget },
+      season: { year, members: summer.members, kmStart: km, startBudget: summer.budget, past: [...season.past, summary] },
+    };
+    writeSlot("auto", next);
+    setBoot({ kind: "file", save: next });
+    reload();
+  };
+
+  seasonPanel.addEventListener("click", (e) => {
+    const step = (e.target as HTMLElement).closest("button")?.dataset.season;
+    if (step === "summer") {
+      showSeason("summer");
+    } else if (step === "next") {
+      startNextSeason();
+    }
+  });
 
   const reports: { report: Report; rosy: boolean }[] = [];
   let reportIndex = -1;
@@ -2704,7 +2856,7 @@ async function main() {
     format: SAVE_FORMAT,
     version: SAVE_VERSION,
     savedAt: new Date().toISOString(),
-    label: `${clock.label()} · ${((tracks.size * map.tileSize) / 1000).toFixed(1)} km · ${kr(budget)}`,
+    label: `${season.year === FIRST_SEASON ? "" : `${seasonName(season.year)} · `}${clock.label()} · ${((tracks.size * map.tileSize) / 1000).toFixed(1)} km · ${kr(budget)}`,
     map: { name: map.name, title: map.title, version: map.version, grid: map.grid },
     clock: { hours: clock.hours, speedIndex: clock.speedIndex },
     budget,
@@ -2719,7 +2871,7 @@ async function main() {
     lastReportDay,
     snowSinceReport,
     rainSinceReport,
-    weather: { snowDepth: weather.snowDepth, plans: weather.allPlans() },
+    weather: { snowDepth: weather.snowDepth, highDepth: weather.highDepth, plans: weather.allPlans() },
     tracks: encodeTracks(map, tracks),
     garages: fleet.groomers.map((g) => ({ tile: map.toGrid(g.garage.x, g.garage.y), totalGroomed: g.totalGroomed })),
     kiosks: kiosks.map((k) => ({ tile: map.toGrid(k.x, k.y), tier: k.tier, soldToday: k.soldToday, broken: k.broken, experts: k.experts, kind: k.kind, name: k.name })),
@@ -2729,11 +2881,16 @@ async function main() {
     varingen: { ...paper, press: crowd.press, roadsToday, snowToday, rainToday },
     accounts: { history, dayStartBudget },
     alpine: { chairlift: alpine.hasChairlift },
+    season: { ...season },
   });
 
   /** Rebuild a saved game on this freshly started page. Returns what to tell the player. */
   const restore = (save: SaveGame): string => {
     timeStarted = true;
+    if (save.season) {
+      Object.assign(season, save.season);
+      setSeason(season.year);
+    }
     clock.hours = save.clock.hours;
     clock.speedIndex = save.clock.speedIndex;
     clock.paused = true;
@@ -2752,7 +2909,7 @@ async function main() {
     lastReportDay = save.lastReportDay;
     snowSinceReport = save.snowSinceReport;
     rainSinceReport = save.rainSinceReport;
-    weather.restore(save.weather.plans, save.weather.snowDepth, clock.hours);
+    weather.restore(save.weather.plans, save.weather.snowDepth, clock.hours, save.weather.highDepth);
     const result = decodeTracks(map, tracks, save.tracks);
     for (const g of save.garages) {
       const local = map.fromGrid(g.tile);
@@ -2800,6 +2957,10 @@ async function main() {
     }
     forecastDay = clock.day;
     refreshForecast();
+    if (season.ended) {
+      clock.ended = true;
+      showSeason(season.summer ? "summer" : "meeting");
+    }
     document.getElementById("setup")!.hidden = fleet.garages.length > 0;
     setTool(fleet.garages.length > 0 ? restingTool() : "garage");
     camera.centreOn((crew.x + 0.5) * PX, (crew.y + 0.5) * PX, app.screen.width, app.screen.height);
