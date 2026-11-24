@@ -477,7 +477,7 @@ function outing(day: number, h: number): { out: number; dark: boolean } {
   return { out: daytime + (dark ? evening + early : 0), dark };
 }
 
-/** How far, in tiles, people walk from their door to a track. */
+/** How far, in tiles, people go from their door to a track: a square of this reach around the track. */
 export const HOMES_REACH = 12;
 /** Houses this close, in tiles, belong to the same neighbourhood. */
 const NEIGHBOURS = 2;
@@ -485,13 +485,13 @@ const MIN_HOUSES = 6;
 /** Peak skiers per hour from each house within walking distance of a track. */
 export const SKIERS_PER_HOUSE = 0.06;
 
-/** Every tile within r tiles of any of the given tiles. */
+/** Every tile in the square reaching r tiles out from any of the given tiles. */
 function around(map: GameMap, tiles: [number, number][], r: number): Set<number> {
   const out = new Set<number>();
   for (const [x, y] of tiles) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy <= r * r && map.inside(x + dx, y + dy)) {
+        if (map.inside(x + dx, y + dy)) {
           out.add(map.index(x + dx, y + dy));
         }
       }
@@ -532,11 +532,14 @@ function neighbourhoods(map: GameMap): [number, number][][] {
   return out;
 }
 
-/** Steps from each tile to the nearest track, up to max; 255 beyond. */
-function walkingDistance(map: GameMap, tracks: TrackNetwork, max: number): Uint8Array {
+/**
+ * Tiles from each tile to the nearest of the given tiles, up to max; 255 beyond. Diagonal
+ * steps count as one, so everything within a distance forms squares around the tiles.
+ */
+export function reachFrom(map: GameMap, tiles: Iterable<[number, number]>, max: number): Uint8Array {
   const dist = new Uint8Array(map.width * map.height).fill(255);
   let frontier: number[] = [];
-  for (const [x, y] of tracks.each()) {
+  for (const [x, y] of tiles) {
     const i = map.index(x, y);
     dist[i] = 0;
     frontier.push(i);
@@ -748,7 +751,7 @@ export class Crowd {
         }
       }
     }
-    const walk = walkingDistance(this.map, tracks, HOMES_REACH);
+    const walk = reachFrom(this.map, tracks.each(), HOMES_REACH);
     for (const h of this.trailheads) {
       if (h.kind === "homes") {
         h.served = h.entry ? h.houseTiles.filter(([x, y]) => walk[this.map.index(x, y)] <= HOMES_REACH).length : 0;

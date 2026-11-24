@@ -34,13 +34,14 @@ Controls (press `H` in the game for the full list):
   Keyboard players can walk the crew there and press Enter.
 - **Track grows from the network**, as in the old tycoon games: the first track starts at the
   garage, and every new piece after that has to connect to track you already have. With the
-  build tool, loose ends of the network are marked so they show at any zoom. A drag started
+  build tool, loose ends of the network are marked so they show at any zoom. Nothing is built
+  until a plan is confirmed with its green button, whose label varies ("Kjør på!", "Jadda!",
+  "LØØØØYPE!"; "Bruk penger" when it is expensive). A mouse drag draws the plan by hand; one started
   up to three tiles from the network is linked to it with a straight piece of track (as long
   as that piece crosses no road or railway). A click or tap further away, up to 30 tiles from
   the network, plans a route there: the cheapest way, winding around houses, ground too steep
   for the snowcat and costly crossings, using an existing bridge or underpass where there is
-  one. It is shown with its price before anything is built. Beyond that it is refused, with an
-  arrow to the nearest track. When a tile is refused (a house, a built-up area, too steep, not enough
+  one. Beyond that it is refused, with an arrow to the nearest track. When a tile is refused (a house, a built-up area, too steep, not enough
   money), the reason pops up on the map beside it. Track can be removed anywhere, which saves grooming diesel on stretches
   nobody uses.
 - **Keyboard track laying**, as in the old tycoon games: Num Lock or `T` toggles
@@ -124,15 +125,17 @@ happier and more generous.
 ### Where skiers come from
 
 - **Houses**: houses within 50 m of each other form one neighbourhood ("boligfeltet ved …"). Every
-  house within 300 m (12 tiles) of a track sends skiers, so a track through a village serves more
-  houses than one along its edge.
+  house inside the square reaching 300 m (12 tiles) out from a track sends skiers, so a track
+  through a village serves more houses than one along its edge.
 - **Stations** send a group with each hourly train; **car parks** send a steady stream.
 - **Length**: Norwegians travel for long tracks. Visitors by train and car come roughly in step with
   the length of the network they reach (3 km ×1, 10 km ×2.6, 30 km ×6.3); locals ski from the door
   anyway, so length counts less for them.
-- With ⛷ Bygg løype selected, every place not yet reached is shown: a dot sized by how many skiers
-  it can give, the ground where a track would reach it in green, and a label ("222 hus", "≈ 15 en
-  fin lørdag"). Hovering a tile tells how many houses there are and how many live near the track.
+- With ⛷ Bygg løype selected the map shows, as in the old tycoon games, the square-edged zone
+  within 300 m of the network in blue, with a green dot on every house inside it, and every place
+  not yet reached as a dot sized by how many skiers it can give, labelled ("222 hus", "≈ 15 en fin
+  lørdag"). A planned route shows the zone it adds in yellow, with a yellow dot on each house it
+  brings in and the count in the plan ("+252 hus innen 300 m").
 
 ### Grooming and the tiller
 
@@ -253,7 +256,7 @@ Touch gestures: with the build tool a tap (or a long press) plans the cheapest r
 from the red flag (the track crew: at the garage at first, then wherever the last track
 ended) to the tapped spot, up to 30 tiles. The plan shows on the map — green for new track,
 yellow where it crosses a road or the railway, a red cross where it has to stop — with the
-number of tiles, the price and each crossing named, and is only laid on "Lag løype"
+number of tiles, the price and each crossing named, and is only laid on the green button
 ("Avbryt" drops it); crossing dialogs come up on the way and building carries on after each; tapping existing track moves the flag there to branch off, and ↶ (or
 Ctrl/Cmd+Z) takes back the last stroke and its cost. A finger that moves before lifting
 pans the map instead, in every tool, so track is only ever laid through a confirmed plan; a
