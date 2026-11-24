@@ -48,7 +48,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 .plus { color: #1f8a3a; font-weight: 600; }
 .minus { color: #c0392b; font-weight: 600; }
 #report-button, #paper-button { position: relative; }
-#report-button.unread::after, #paper-button.unread::after { content: ""; position: absolute; top: -3px; right: -3px; width: 10px; height: 10px;
+#report-button.unread::after, #paper-button.unread::after, #feed-button.unread::after { content: ""; position: absolute; top: -3px; right: -3px; width: 10px; height: 10px;
   border-radius: 50%; background: #e8591a; border: 2px solid #fff; }
 #report { position: fixed; right: 12px; top: 110px; width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 170px);
   display: flex; flex-direction: column; background: #fff; border-radius: 18px; border: 6px solid #23323d;
@@ -343,3 +343,26 @@ html.compact #accounts { width: calc(100vw - 16px); font-size: 13px; padding: 10
 #paper .facts table { width: 100%; border-collapse: collapse; font-size: 12px; }
 #paper .facts td { padding: 1px 0; }
 #paper .facts td:last-child { text-align: right; font-weight: 700; }
+
+#feed-button { position: relative; }
+#feed { position: fixed; right: 16px; top: 110px; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 170px);
+  display: flex; flex-direction: column; background: #e9ebef; border-radius: 8px; border: 1px solid #b9c2cf;
+  box-shadow: 0 12px 34px rgba(20, 35, 70, 0.4); overflow: hidden; z-index: 6; font-size: 14px; }
+#feed[hidden] { display: none; }
+#feed .bar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: #2f5fb0; color: #fff; }
+#feed .bar strong { flex: 1; }
+#feed .bar button { font: inherit; background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; }
+#feed .posts { overflow-y: auto; padding: 8px; }
+#feed .post { background: #fff; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
+#feed .post.driver { border-left: 4px solid #e8591a; }
+#feed .post header { display: flex; gap: 8px; align-items: center; }
+#feed .post header div { display: flex; flex-direction: column; }
+#feed .post header small { color: #65676b; font-size: 12px; }
+#feed .avatar { width: 34px; height: 34px; border-radius: 50%; background: #c9d6ea; display: flex; align-items: center;
+  justify-content: center; font-weight: 700; font-size: 13px; color: #2f4a70; flex: none; }
+#feed .post p { margin: 8px 0; line-height: 1.35; }
+#feed .post img { display: block; width: calc(100% + 24px); margin: 0 -12px; }
+#feed .likes { color: #65676b; font-size: 12px; padding: 6px 0; border-bottom: 1px solid #e4e6eb; margin-bottom: 4px; }
+#feed .comment { background: #f0f2f5; border-radius: 12px; padding: 5px 10px; margin: 4px 0; font-size: 13px; width: fit-content; max-width: 100%; }
+#feed .empty { text-align: center; color: #65676b; margin: 30px 0; }
+html.compact #feed { left: 12px; right: 12px; width: auto; top: 12px; max-height: calc(100dvh - 24px); }

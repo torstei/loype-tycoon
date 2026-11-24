@@ -25,13 +25,9 @@ const builtUp = (map: GameMap, x: number, y: number) => {
   return false;
 };
 
-/**
- * Outside lights on the houses and street lights along the main roads, and along smaller roads
- * where people live. Drawn once; fade in with the dark by setting the alpha.
- */
-export function nightLights(map: GameMap): Graphics {
-  const lamps: [number, number, number][] = [];
-  const heads: { x: number; y: number; nx: number; ny: number }[] = [];
+/** Street lamps in tile units: every 50 m on the main roads, sparser through built-up areas. */
+export function streetLamps(map: GameMap): { x: number; y: number; nx: number; ny: number; main: boolean }[] {
+  const out: { x: number; y: number; nx: number; ny: number; main: boolean }[] = [];
   for (const line of map.lines) {
     if (line.kind !== "road_name") {
       continue;
@@ -53,13 +49,30 @@ export function nightLights(map: GameMap): Graphics {
         const x = ax + ((bx - ax) * d) / len;
         const y = ay + ((by - ay) * d) / len;
         if (main) {
-          heads.push({ x: (x + nx * 0.3) * PX, y: (y + ny * 0.3) * PX, nx, ny });
+          out.push({ x: x + nx * 0.3, y: y + ny * 0.3, nx, ny, main });
         } else if (builtUp(map, x + nx * 0.45, y + ny * 0.45)) {
-          lamps.push([(x + nx * 0.45) * PX, (y + ny * 0.45) * PX, 1.1]);
+          out.push({ x: x + nx * 0.45, y: y + ny * 0.45, nx, ny, main });
         }
       }
       carry = (carry - len) % spacing;
       carry = carry < 0 ? carry + spacing : carry;
+    }
+  }
+  return out;
+}
+
+/**
+ * Outside lights on the houses and street lights along the main roads, and along smaller roads
+ * where people live. Drawn once; fade in with the dark by setting the alpha.
+ */
+export function nightLights(map: GameMap): Graphics {
+  const lamps: [number, number, number][] = [];
+  const heads: { x: number; y: number; nx: number; ny: number }[] = [];
+  for (const l of streetLamps(map)) {
+    if (l.main) {
+      heads.push({ x: l.x * PX, y: l.y * PX, nx: l.nx, ny: l.ny });
+    } else {
+      lamps.push([l.x * PX, l.y * PX, 1.1]);
     }
   }
   for (let ty = 0; ty < map.height; ty++) {

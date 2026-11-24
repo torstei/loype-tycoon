@@ -160,6 +160,25 @@ it every December. In the game its roof, garden, tree and reindeer twinkle after
 start of the season until Tjugendedag (13 January), when the lights come down. Varingen covers
 the lighting-up, the slow traffic on RV4 past the house and the dark after Tjugendedag.
 
+### The local group
+
+📱 Gruppa opens "Preppestatus Hakadal og omegn", the local group where skiers and the snowcat
+driver post about the tracks. Posts come from what happens in the game. Each comes with a photo taken
+on the spot at eye height: a small software renderer builds the view from the height model, forest,
+houses, roads and the track itself (corduroy and classic grooves, or ice and new snow), lit for
+the time of day, with the street lamps and lit windows after dark. Trees, skiers, the snowcat and
+the moose are drawn as outlined cartoon shapes. Good-weather posts are taken facing the sun, to show
+off, with rays and a lens flare. Posts can be about:
+- the driver out grooming at night;
+- a perfect cold, sunny day on fresh track;
+- icy or snowed-in track;
+- a moose in the track;
+- the Christmas house, a queue at the waffle stand, or the chair-lift;
+- the odd lost mitten or cat.
+
+Comments and likes follow, and each post nudges the club's reputation a little up or down. At most a
+post every few hours, and the same kind of post only every few days.
+
 ### Seasons
 
 From 1 March, the season ends on the first night when hardly any track has snow left to ski on,

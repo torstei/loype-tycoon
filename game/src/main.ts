@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
+import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture } from "pixi.js";
 import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, EARLIEST_SEASON_END, FIRST_SEASON, GameClock, holiday, isWeekend, MAX_SEASON_DAYS, seasonName, setSeason, SPEEDS, weekday } from "./clock";
 import { meetingHtml, rating, seasonEdition, SeasonSummary, settleSummer, Summer, summarise, summerHtml } from "./season";
@@ -31,13 +31,15 @@ import { around, Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, reachFr
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
-import { landscapeFields, PX, renderChunk, renderLandscape } from "./render";
+import { hash, landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
 import { Flag, FLAG_NAMES, Terrain, TERRAIN_NAMES } from "./terrain";
 import { askCrossing } from "./crossing";
 import { Alpine, CHAIRLIFT_PRICE } from "./alpine";
-import { nightLights } from "./lights";
-import { Julehus, LIGHTS_DOWN_DAY } from "./christmas";
+import { GroundShot, groundPhoto, sunDirection } from "./groundphoto";
+import { nightLights, streetLamps } from "./lights";
+import { Julehus, JULEHUS, LIGHTS_DOWN_DAY } from "./christmas";
+import { feedHtml, GROUP_NAME, Post, PostKind, writePost } from "./feed";
 import { findRoute, RouteGround } from "./route";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, MIN_GROOMING_DEPTH, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
@@ -83,6 +85,12 @@ const PAN_KEYS: Record<string, [number, number]> = {
 };
 
 const START_BUDGET = 150_000;
+/** Tiles across and down in a posted photo, and its pixels per world pixel. */
+const PHOTO_TILES = [20, 13] as const;
+const PHOTO_RESOLUTION = 1.25;
+const SKIER_COLOURS = [0xc8342b, 0x2f5fb0, 0xf2c12e, 0x3aa35a, 0x7a3fa0, 0x222831];
+/** How much one post in the local group moves the club's standing. */
+const FEED_REPUTATION = 0.004;
 const BULLDOZER = `<svg class="dozer" viewBox="0 0 24 24" aria-hidden="true">
   <rect x="7" y="15.5" width="15.5" height="6" rx="3" fill="#3b3b3b"/>
   <circle cx="10" cy="18.5" r="1.4" fill="#a0a0a0"/><circle cx="19.5" cy="18.5" r="1.4" fill="#a0a0a0"/>
@@ -198,6 +206,52 @@ async function main() {
   lightsWorld.addChild(townLights, julehus.lights, alpine.lights, crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
   const precipitation = new Precipitation();
   app.stage.addChild(night, lightsWorld, precipitation.layer);
+
+  /** Layers a photo of the landscape leaves out: the player's tools, signs and speech bubbles. */
+  const notInPhotos = () => [cursor, labels, planZone, planLayer, endsLayer, refusalTag, headLabels, crew.layer, trailheadLayer, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles];
+  /** A snapshot of the world around a tile, as a skier with a phone would post it; null while fast-forwarding. */
+  const takePhoto = (tx: number, ty: number): string | null => {
+    if (fastForwarding) {
+      return null;
+    }
+    const w = PHOTO_TILES[0] * PX;
+    const h = PHOTO_TILES[1] * PX;
+    const x0 = Math.max(0, Math.min(mapW - w, (tx + 0.5) * PX - w / 2));
+    const y0 = Math.max(0, Math.min(mapH - h, (ty + 0.5) * PX - h / 2));
+    chunks.update(x0, y0, x0 + w, y0 + h, 1000);
+    const hidden = notInPhotos();
+    const shown = hidden.map((c) => c.visible);
+    hidden.forEach((c) => (c.visible = false));
+    const detailShown = [detail.visible, detail.alpha] as const;
+    detail.visible = true;
+    detail.alpha = 1;
+    const area = new Rectangle(x0, y0, w, h);
+    const base = app.renderer.extract.canvas({ target: world, frame: area, resolution: PHOTO_RESOLUTION }) as HTMLCanvasElement;
+    const darkness = 1 - clock.daylight();
+    const lights = darkness > 0.05 ? (app.renderer.extract.canvas({ target: lightsWorld, frame: area, resolution: PHOTO_RESOLUTION }) as HTMLCanvasElement) : null;
+    hidden.forEach((c, i) => (c.visible = shown[i]));
+    [detail.visible, detail.alpha] = detailShown;
+    const out = document.createElement("canvas");
+    out.width = base.width;
+    out.height = base.height;
+    const ctx = out.getContext("2d")!;
+    ctx.drawImage(base, 0, 0);
+    if (lights) {
+      ctx.fillStyle = `rgba(11, 26, 58, ${darkness * 0.62})`;
+      ctx.fillRect(0, 0, out.width, out.height);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.drawImage(lights, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+    }
+    const cx = out.width / 2;
+    const cy = out.height / 2;
+    const vignette = ctx.createRadialGradient(cx, cy, Math.min(cx, cy) * 0.6, cx, cy, Math.hypot(cx, cy));
+    vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+    vignette.addColorStop(1, "rgba(0, 0, 0, 0.32)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, out.width, out.height);
+    return out.toDataURL("image/jpeg", 0.72);
+  };
   const ledger = {
     spend: (amount: number) => {
       if (amount > budget) {
@@ -221,7 +275,7 @@ async function main() {
   if (new URLSearchParams(location.search).has("debug")) {
     Object.assign(window, { loype: { map, world, camera, whimsy, alpine, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks,
       fastForward: (hours: number, step?: number) => fastForward(hours, step), history: () => history,
-      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition() } });
+      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition(), photo: (x: number, y: number) => takePhoto(x, y), groundShot: (view: View) => groundShot(view), viewAlongTrack: (x: number, y: number, subject?: View["subject"]) => viewAlongTrack(x, y, subject), viewDownLift: () => viewDownLift(), viewIntoSun: (x: number, y: number, subject?: View["subject"]) => viewIntoSun(x, y, subject), post: (kind: PostKind, x?: number, y?: number) => post(kind, x === undefined ? null : [x, y!]), feed: () => feed } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -255,6 +309,10 @@ async function main() {
   const calendar = () => {
     if (clock.ended) {
       return;
+    }
+    if (Math.floor(clock.hours) !== feedHour) {
+      feedHour = Math.floor(clock.hours);
+      feedTick();
     }
     if (clock.day > lastReportDay && clock.hourOfDay >= 7 && clock.hourOfDay < 12 && tracks.size > 0) {
       lastReportDay = clock.day;
@@ -1187,6 +1245,211 @@ async function main() {
   });
   paperButton.addEventListener("click", () => showPaper(paperPanel.hidden));
 
+  const feed: Post[] = [];
+  let feedHour = -1;
+  /** Absolute game hour each kind of post last went up, so the feed does not repeat itself. */
+  const lastPosted = new Map<PostKind, number>();
+  const feedPanel = document.getElementById("feed")!;
+  const feedButton = document.getElementById("feed-button")!;
+  const placeNames = map.pois.filter((p) => p.name && (p.kind === "place" || p.kind === "peak" || p.kind === "station"));
+  const placeNear = (x: number, y: number) =>
+    placeNames.reduce((best, p) => (Math.hypot(p.x - x, p.y - y) < Math.hypot(best.x - x, best.y - y) ? p : best), placeNames[0])?.name ?? "Marka";
+  const renderFeed = () => {
+    feedPanel.innerHTML = `<div class="bar"><strong>📱 ${GROUP_NAME}</strong><button data-feed="close">✕</button></div>
+      <div class="posts">${feedHtml(feed)}</div>`;
+  };
+  const showFeed = (open: boolean) => {
+    feedPanel.hidden = !open;
+    if (open) {
+      feedButton.classList.remove("unread");
+      renderFeed();
+    }
+  };
+  feedButton.addEventListener("click", () => showFeed(feedPanel.hidden));
+  feedPanel.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("[data-feed='close']")) {
+      showFeed(false);
+    }
+  });
+
+  type View = Pick<GroundShot, "camera" | "target" | "subject" | "festive" | "brag">;
+  const lampSpots = streetLamps(map).map((l) => [l.x, l.y] as [number, number]);
+  /** A photo taken standing in the world, as a skier sees it; null while fast-forwarding. */
+  const groundShot = (view: View): string | null => {
+    if (fastForwarding) {
+      return null;
+    }
+    const canvas = groundPhoto({
+      map,
+      tracks,
+      ...view,
+      daylight: clock.daylight(),
+      hour: clock.hourOfDay,
+      snowing: weather.precipRate > 0 && weather.temperature < 0.8,
+      condition: (x, y) => tracks.condition(x, y, weather),
+      lamps: lampSpots,
+      seed: Math.floor(clock.hours),
+    });
+    return canvas.toDataURL("image/jpeg", 0.75);
+  };
+  /** Stand on the track a few metres behind a point and look past it, along the track. */
+  const viewAlongTrack = (x: number, y: number, subject?: View["subject"]): View | null => {
+    const tile: [number, number] = [Math.floor(x), Math.floor(y)];
+    let on: [number, number] | null = tracks.has(...tile) ? tile : null;
+    for (let r = 1; !on && r <= 4; r++) {
+      for (let dy = -r; dy <= r && !on; dy++) {
+        for (let dx = -r; dx <= r && !on; dx++) {
+          if (tracks.has(tile[0] + dx, tile[1] + dy)) {
+            on = [tile[0] + dx, tile[1] + dy];
+          }
+        }
+      }
+    }
+    const next = on ? tracks.neighbours(...on) : [];
+    if (!on || next.length === 0) {
+      return null;
+    }
+    const n = next[Math.floor(hash(on[0], on[1], Math.floor(clock.hours)) * next.length)];
+    const onTrack = on[0] === tile[0] && on[1] === tile[1];
+    const [ox, oy] = onTrack ? [x, y] : [on[0] + 0.5, on[1] + 0.5];
+    const len = Math.hypot(n[0] + 0.5 - ox, n[1] + 0.5 - oy) || 1;
+    const [dx, dy] = [(n[0] + 0.5 - ox) / len, (n[1] + 0.5 - oy) / len];
+    if (!onTrack && subject) {
+      return { camera: [ox, oy], target: [x, y], subject };
+    }
+    if (!subject) {
+      return { camera: [ox - dx * 0.3, oy - dy * 0.3], target: [ox + dx * 3, oy + dy * 3] };
+    }
+    return { camera: [ox + dx * 0.45, oy + dy * 0.45], target: [ox - dx * 2, oy - dy * 2], subject };
+  };
+  /** Showing off the weather: stand a few metres behind the subject, facing the sun. */
+  const viewIntoSun = (x: number, y: number, subject?: View["subject"]): View => {
+    let [sx, sy] = sunDirection(clock.hourOfDay);
+    // Where the track runs roughly towards the sun, follow it, so it leads into the picture.
+    const [tx, ty] = [Math.floor(x), Math.floor(y)];
+    let best = 0.6;
+    for (const [nx, ny] of tracks.has(tx, ty) ? tracks.neighbours(tx, ty) : []) {
+      const len = Math.hypot(nx + 0.5 - x, ny + 0.5 - y) || 1;
+      const [dx, dy] = [(nx + 0.5 - x) / len, (ny + 0.5 - y) / len];
+      if (dx * sx + dy * sy > best) {
+        best = dx * sx + dy * sy;
+        [sx, sy] = [dx, dy];
+      }
+    }
+    return { camera: [x - sx * 0.45, y - sy * 0.45], target: [x + sx * 2, y + sy * 2], subject, brag: true };
+  };
+  /** From the top station, down the lift line and out over the valley. */
+  const viewDownLift = (): View | null => {
+    const pts = alpine.mainLift?.line.pts;
+    if (!pts) {
+      return null;
+    }
+    const [bottom, top] = [pts[0], pts[pts.length - 1]];
+    const len = Math.hypot(bottom[0] - top[0], bottom[1] - top[1]) || 1;
+    return { camera: [top[0] + ((bottom[0] - top[0]) / len) * 1.2, top[1] + ((bottom[1] - top[1]) / len) * 1.2], target: [bottom[0], bottom[1]] };
+  };
+
+  /** Posts kept, and how many of the newest keep their photo; old photos would fill the save. */
+  const FEED_KEPT = 30;
+  const FEED_PHOTOS = 10;
+  const post = (kind: PostKind, at: [number, number] | null, extra: { km?: number; waffles?: number; driver?: string } = {}, view: View | null = null) => {
+    const [x, y] = at ?? [startPoi.x, startPoi.y];
+    const p = writePost(kind, {
+      day: clock.day,
+      hour: clock.hourOfDay,
+      place: placeNear(x, y),
+      temperature: weather.temperature,
+      reputation: crowd.reputation,
+      driver: extra.driver ?? fleet.groomers[0]?.name ?? "Gamle Gunnar",
+      km: extra.km,
+      waffles: extra.waffles,
+    }, view ? groundShot(view) : at ? takePhoto(x, y) : null, Math.floor(clock.hours * 7.3) + feed.length);
+    feed.push(p);
+    feed.splice(0, Math.max(0, feed.length - FEED_KEPT));
+    feed.slice(0, -FEED_PHOTOS).forEach((old) => (old.photo = null));
+    lastPosted.set(kind, clock.hours);
+    crowd.reputation = Math.min(1, Math.max(0.05, crowd.reputation + p.tone * FEED_REPUTATION));
+    if (feedPanel.hidden) {
+      feedButton.classList.add("unread");
+    } else {
+      renderFeed();
+    }
+  };
+
+  const since = (kind: PostKind) => clock.hours - (lastPosted.get(kind) ?? -Infinity);
+  const lastAny = () => Math.max(...[...lastPosted.values(), -Infinity]);
+  /** Once an hour: whether anything in the world is worth a post. At most a few a day. */
+  const feedTick = () => {
+    if (fleet.garages.length === 0 || clock.hours - lastAny() < 3) {
+      return;
+    }
+    const h = clock.hourOfDay;
+    const chance = (p: number) => Math.random() < p;
+    const working = fleet.groomers.find((g) => g.state === "grooming" && g.groomedTonight > 15);
+    if (working && (h >= 21 || h < 5) && since("groomed") > 14 && chance(0.35)) {
+      post("groomed", working.tile, { km: (working.groomedTonight * map.tileSize) / 1000, driver: working.name }, viewAlongTrack(working.px, working.py, { kind: "snowcat", x: working.px, y: working.py }));
+      return;
+    }
+    if (tracks.size === 0) {
+      return;
+    }
+    let fresh = 0;
+    let icy = 0;
+    let snowed = 0;
+    const where: Record<string, [number, number]> = {};
+    for (const [x, y] of tracks.each()) {
+      const c = tracks.condition(x, y, weather);
+      fresh += c === "fresh" ? 1 : 0;
+      icy += c === "icy" ? 1 : 0;
+      snowed += c === "snowed" ? 1 : 0;
+      if (!where[c] || Math.random() < 0.05) {
+        where[c] = [x, y];
+      }
+    }
+    const share = (n: number) => n / tracks.size;
+    const day = h >= 9 && h < 16 && clock.daylight() > 0.8;
+    if (day && weather.precipRate === 0 && weather.temperature < -2 && share(fresh) > 0.4 && since("perfect") > 30 && chance(isWeekend(clock.day) ? 0.3 : 0.12)) {
+      const skier = crowd.skiers.find((sk) => !sk.done && tracks.has(...sk.tile) && tracks.condition(...sk.tile, weather) === "fresh");
+      const at = skier ? ([skier.px, skier.py] as [number, number]) : [where.fresh[0] + 0.5, where.fresh[1] + 0.5] as [number, number];
+      post("perfect", skier?.tile ?? where.fresh, {}, viewIntoSun(at[0], at[1], { kind: "skier", x: at[0], y: at[1], colour: SKIER_COLOURS[Math.floor(Math.random() * SKIER_COLOURS.length)] }));
+      return;
+    }
+    if (day && share(icy) > 0.3 && since("icy") > 96 && chance(0.25)) {
+      post("icy", where.icy, {}, viewAlongTrack(where.icy[0] + 0.5, where.icy[1] + 0.5));
+      return;
+    }
+    if (h >= 8 && h < 18 && share(snowed) > 0.4 && since("snowed") > 40 && chance(0.25)) {
+      post("snowed", where.snowed, {}, viewAlongTrack(where.snowed[0] + 0.5, where.snowed[1] + 0.5));
+      return;
+    }
+    const moose = whimsy.moose.find((m) => {
+      const [mx, my] = [Math.floor(m.x / PX), Math.floor(m.y / PX)];
+      return tracks.has(mx, my) || tracks.neighbours(mx, my).length > 0;
+    });
+    if (moose && clock.daylight() > 0.3 && since("moose") > 96 && chance(0.4)) {
+      const [mx, my] = [moose.x / PX, moose.y / PX];
+      post("moose", [Math.floor(mx), Math.floor(my)], {}, viewAlongTrack(mx, my, { kind: "moose", x: mx, y: my }));
+      return;
+    }
+    if (clock.day >= 7 && clock.day <= LIGHTS_DOWN_DAY && h >= 17 && h < 22 && since("julehus") > 24 * 10 && chance(0.15)) {
+      post("julehus", [JULEHUS.x, JULEHUS.y], {}, { camera: [JULEHUS.x + 1.5, JULEHUS.y + 2.1], target: [JULEHUS.x + 0.5, JULEHUS.y + 0.5], festive: [JULEHUS.x, JULEHUS.y] });
+      return;
+    }
+    const busy = kiosks.find((k) => k.kind === "stand" && k.soldToday >= 60);
+    if (busy && h >= 12 && h < 16 && since("waffles") > 96 && chance(0.3)) {
+      post("waffles", [busy.x, busy.y], { waffles: busy.soldToday });
+      return;
+    }
+    const top = alpine.topStation;
+    if (top && crowd.liftRunning && since("chairlift") > 24 * 6 && chance(0.2)) {
+      post("chairlift", [Math.floor(top[0]), Math.floor(top[1])], {}, viewDownLift());
+      return;
+    }
+    if (h >= 8 && h < 23 && since("offtopic") > 72 && chance(0.03)) {
+      post("offtopic", null);
+    }
+  };
+
   /** The winter is over when, from March on, hardly any of the track has snow left to ski on. */
   const snowGone = (day: number): boolean => {
     if (day >= MAX_SEASON_DAYS - 1) {
@@ -1292,6 +1555,7 @@ async function main() {
       reports: [],
       varingen: { ...base.varingen!, editions: [], week: [], kmAtLastEdition: km, lastDay: -1, pressUntil: -1, press: 1, roadsToday: [], snowToday: 0, rainToday: 0 },
       accounts: { history: [], dayStartBudget: summer.budget },
+      feed: [],
       season: { year, members: summer.members, kmStart: km, startBudget: summer.budget, past: [...season.past, summary] },
     };
     writeSlot("auto", next);
@@ -2840,6 +3104,7 @@ async function main() {
       showPaper(false);
       kioskPanel.hidden = true;
       liftPanel.hidden = true;
+      showFeed(false);
       closeMenus();
       clearPlan();
     } else {
@@ -2882,6 +3147,7 @@ async function main() {
     accounts: { history, dayStartBudget },
     alpine: { chairlift: alpine.hasChairlift },
     season: { ...season },
+    feed,
   });
 
   /** Rebuild a saved game on this freshly started page. Returns what to tell the player. */
@@ -2890,6 +3156,10 @@ async function main() {
     if (save.season) {
       Object.assign(season, save.season);
       setSeason(season.year);
+    }
+    feed.push(...(save.feed ?? []));
+    for (const p of feed) {
+      lastPosted.set(p.kind, Math.max(lastPosted.get(p.kind) ?? -Infinity, p.day * 24 + p.hour));
     }
     clock.hours = save.clock.hours;
     clock.speedIndex = save.clock.speedIndex;

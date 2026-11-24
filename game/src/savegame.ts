@@ -1,6 +1,7 @@
 import { Grid, GameMap, GridTile } from "./map";
 import { DayStats } from "./skiers";
 import { Crossing, TrackNetwork } from "./tracks";
+import { Post } from "./feed";
 import { SeasonSummary, Summer } from "./season";
 import { DayNews, Edition } from "./varingen";
 import { DayPlan } from "./weather";
@@ -58,6 +59,8 @@ export interface SaveGame {
   kiosks?: { tile: GridTile; tier: number; soldToday: number; broken: boolean; experts?: boolean; kind?: "stand" | "cabin"; name?: string | null }[];
   /** Absent in saves from before the ski lifts were drawn. */
   alpine?: { chairlift: boolean };
+  /** Absent in saves from before the local group existed. */
+  feed?: Post[];
   /** Absent in saves from the first winter, before seasons ended. */
   season?: {
     year: number;
