@@ -15,7 +15,8 @@ Real places, invented organisations.
 The Hakadal map covers 10×10 km. The detailed landscape is drawn in chunks of 50×50 tiles as
 they come into view, and the least recently seen are dropped again, so a large map neither
 takes long to load nor holds the whole landscape in memory; the overview map stands in until
-a chunk is ready.
+a chunk is ready. The overview is a winter board-game map: snowy forest, frozen lakes, and
+ground too steep for the snowcat shaded with fall lines, as on the detail map.
 
 ## Running the game
 

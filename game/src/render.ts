@@ -24,7 +24,7 @@ const SNOW_BANDS: [number, RGB][] = [
   [Infinity, [253, 254, 255]],
 ];
 
-function snow(shade: number): RGB {
+export function snow(shade: number): RGB {
   for (const [limit, colour] of SNOW_BANDS) {
     if (shade < limit) {
       return colour;
@@ -232,7 +232,7 @@ const HACHURE_FROM = 25;
 const GRADED = Flag.Road | Flag.ForestRoad;
 
 /** Downhill unit vector at a tile. */
-function downhill(map: GameMap, x: number, y: number): [number, number] {
+export function downhill(map: GameMap, x: number, y: number): [number, number] {
   const e = (dx: number, dy: number) =>
     map.elevationAt(Math.min(map.width - 1, Math.max(0, x + dx)), Math.min(map.height - 1, Math.max(0, y + dy)));
   const gx = e(1, 0) - e(-1, 0);
