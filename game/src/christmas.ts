@@ -38,19 +38,22 @@ export class Julehus {
     const b = this.bulbs;
     line(b, cx - 9, cy - 1, cx, cy - 9, 1.8, 1);
     line(b, cx, cy - 9, cx + 9, cy - 1, 1.8, 2);
-    const g = PX * 1.3;
-    line(b, cx - g, cy - g, cx + g, cy - g, 2.4, 3);
-    line(b, cx + g, cy - g, cx + g, cy + g, 2.4, 4);
-    line(b, cx + g, cy + g, cx - g, cy + g, 2.4, 5);
-    line(b, cx - g, cy + g, cx - g, cy - g, 2.4, 6);
-    const tx = cx + PX * 0.8;
-    const ty = cy + PX * 0.7;
+    const west = cx - PX * 1.5;
+    const east = cx + PX * 0.45;
+    const north = cy - PX * 0.9;
+    const south = cy + PX * 1.3;
+    line(b, west, north, east, north, 2.4, 3);
+    line(b, east, north, east, south, 2.4, 4);
+    line(b, east, south, west, south, 2.4, 5);
+    line(b, west, south, west, north, 2.4, 6);
+    const tx = cx - PX * 1.05;
+    const ty = cy - PX * 0.2;
     for (let i = 0; i < 4; i++) {
       line(b, tx - 6 + i * 1.5, ty + 6 - i * 3.5, tx + 6 - i * 1.5, ty + 6 - i * 3.5, 2.2, 10 + i);
     }
     b.push({ x: tx, y: ty - 9, colour: 0xffe680, phase: 0, speed: 0 });
-    const rx = cx - PX * 0.8;
-    const ry = cy + PX * 0.8;
+    const rx = cx - PX * 0.5;
+    const ry = cy + PX * 0.85;
     const reindeer = b.length;
     for (const [ax, ay, bx2, by2] of [[-5, 0, 4, 0], [-4, 0, -4, 4], [3, 0, 3, 4], [4, 0, 6, -4], [6, -4, 8, -6], [6, -4, 4, -7]]) {
       line(b, rx + ax, ry + ay, rx + bx2, ry + by2, 2, 20);
@@ -71,10 +74,10 @@ export class Julehus {
     }
     this.t += dt;
     const g = this.lights.clear();
-    const cx = (JULEHUS.x + 0.5) * PX;
-    const cy = (JULEHUS.y + 0.5) * PX;
+    const cx = (JULEHUS.x + 0.1) * PX;
+    const cy = (JULEHUS.y + 0.6) * PX;
     const hue = COLOURS[Math.floor(this.t * 0.8) % COLOURS.length];
-    for (const [r, a] of [[PX * 6, 0.06], [PX * 3.5, 0.1], [PX * 2, 0.12]]) {
+    for (const [r, a] of [[PX * 5, 0.05], [PX * 3, 0.08], [PX * 1.7, 0.1]]) {
       g.circle(cx, cy, r).fill({ color: hue, alpha: a });
     }
     if (!detail) {
