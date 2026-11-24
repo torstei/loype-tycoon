@@ -36,8 +36,11 @@ Controls (press `H` in the game for the full list):
   garage, and every new piece after that has to connect to track you already have. With the
   build tool, loose ends of the network are marked so they show at any zoom. A drag started
   up to three tiles from the network is linked to it with a straight piece of track (as long
-  as that piece crosses no road or railway); further away it is refused, with an arrow to the
-  nearest track. When a tile is refused (a house, a built-up area, too steep, not enough
+  as that piece crosses no road or railway). A click or tap further away, up to 30 tiles from
+  the network, plans a route there: the cheapest way, winding around houses, ground too steep
+  for the snowcat and costly crossings, using an existing bridge or underpass where there is
+  one. It is shown with its price before anything is built. Beyond that it is refused, with an
+  arrow to the nearest track. When a tile is refused (a house, a built-up area, too steep, not enough
   money), the reason pops up on the map beside it. Track can be removed anywhere, which saves grooming diesel on stretches
   nobody uses.
 - **Keyboard track laying**, as in the old tycoon games: Num Lock or `T` toggles
@@ -246,7 +249,7 @@ top, the tools as a single scrolling row of icons at the bottom (with zoom and f
 buttons) that ▾ tucks away together with the snowcat panel and 🛠 brings back, panels across
 the full width, and tile info on tap instead of hover, fading after a few seconds.
 
-Touch gestures: with the build tool a tap (or a long press) plans track in a straight line
+Touch gestures: with the build tool a tap (or a long press) plans the cheapest route of track
 from the red flag (the track crew: at the garage at first, then wherever the last track
 ended) to the tapped spot, up to 30 tiles. The plan shows on the map — green for new track,
 yellow where it crosses a road or the railway, a red cross where it has to stop — with the
