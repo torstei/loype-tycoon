@@ -22,7 +22,7 @@ export function showTouchTips() {
     <div class="card">
       <h1>Slik spiller du på mobil</h1>
       <ul>
-        <li>Trykk der løypa skal gå, sjekk planen og trykk <strong>Lag løype</strong>.</li>
+        <li>Trykk der løypa skal gå, sjekk planen og trykk på den grønne knappen.</li>
         <li>Én finger flytter kartet, to fingre zoomer.</li>
         <li><strong>⛷▴</strong> nederst bytter verktøy, og <strong>↶</strong> angrer.</li>
       </ul>

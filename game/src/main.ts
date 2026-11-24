@@ -26,7 +26,7 @@ import {
   writeSlot,
 } from "./savegame";
 import { Skijorer } from "./skijor";
-import { Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
+import { Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, reachFrom, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
@@ -183,7 +183,9 @@ async function main() {
   world.addChild(labels);
   const signs = [...addPoiLabels(map, labels), ...addCrossingSigns(map, tracks, labels)];
   const planLayer = new Graphics();
-  world.addChild(planLayer, endsLayer, refusalTag);
+  /** The ground a planned route would bring within reach of houses. */
+  const planZone = new Container();
+  world.addChild(planZone, planLayer, endsLayer, refusalTag);
   const night = new Graphics();
   const lightsWorld = new Container();
   lightsWorld.addChild(crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
@@ -1179,7 +1181,7 @@ async function main() {
       ? "home"
       : starting
         ? "start"
-        : `${showAll ? "all" : "own"}|${Math.round(crowd.reputation * 10)}|${Math.round(tracks.size / 20)}|${connected.map((h) => `${h.x},${h.y}`).join(";")}`;
+        : `${showAll ? "all" : "own"}|${Math.round(crowd.reputation * 10)}|${showAll ? tracks.size : Math.round(tracks.size / 20)}|${connected.map((h) => `${h.x},${h.y}`).join(";")}`;
     if (signature === trailheadSignature) {
       return;
     }
@@ -1196,8 +1198,10 @@ async function main() {
       return;
     }
     const open = showAll ? crowd.trailheads.filter((h) => !h.entry) : [];
-    if (open.length > 0) {
-      trailheadLayer.addChild(catchmentSprite(open));
+    if (showAll) {
+      const reach = reachFrom(map, tracks.each(), HOMES_REACH);
+      const inside = (i: number) => reach[i] <= HOMES_REACH;
+      trailheadLayer.addChild(zone(inside, NETWORK_ZONE), houseDots(inside, 0x1f8a3a));
     }
     for (const h of [...open, ...connected]) {
       const cx = (h.x + 0.5) * PX;
@@ -1228,27 +1232,64 @@ async function main() {
     }
   };
 
-  /** The ground where a track would bring skiers from these trailheads, as one tinted overlay. */
-  const catchmentSprite = (heads: Trailhead[]): Sprite => {
+  const NETWORK_ZONE = 0x1f5fd1;
+  const PLAN_ZONE = 0xf2b705;
+
+  /** A square-edged zone of tiles, tinted and outlined, like a station's catchment in the old tycoon games. */
+  const zone = (inside: (i: number) => boolean, colour: number): Container => {
     const canvas = document.createElement("canvas");
     canvas.width = map.width;
     canvas.height = map.height;
     const ctx = canvas.getContext("2d")!;
     const img = ctx.createImageData(map.width, map.height);
-    for (const h of heads) {
-      for (const i of h.catchment) {
-        img.data[i * 4] = 0x1f;
-        img.data[i * 4 + 1] = 0x8a;
-        img.data[i * 4 + 2] = 0x3a;
-        img.data[i * 4 + 3] = 64;
+    const outline = new Graphics();
+    const out = (x: number, y: number) => !map.inside(x, y) || !inside(map.index(x, y));
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        const i = map.index(x, y);
+        if (!inside(i)) {
+          continue;
+        }
+        img.data[i * 4] = (colour >> 16) & 255;
+        img.data[i * 4 + 1] = (colour >> 8) & 255;
+        img.data[i * 4 + 2] = colour & 255;
+        img.data[i * 4 + 3] = 48;
+        if (out(x, y - 1)) {
+          outline.moveTo(x * PX, y * PX).lineTo((x + 1) * PX, y * PX);
+        }
+        if (out(x, y + 1)) {
+          outline.moveTo(x * PX, (y + 1) * PX).lineTo((x + 1) * PX, (y + 1) * PX);
+        }
+        if (out(x - 1, y)) {
+          outline.moveTo(x * PX, y * PX).lineTo(x * PX, (y + 1) * PX);
+        }
+        if (out(x + 1, y)) {
+          outline.moveTo((x + 1) * PX, y * PX).lineTo((x + 1) * PX, (y + 1) * PX);
+        }
       }
     }
     ctx.putImageData(img, 0, 0);
     const texture = Texture.from(canvas);
     texture.source.scaleMode = "nearest";
-    const sprite = new Sprite(texture);
-    sprite.scale.set(PX);
-    return sprite;
+    const fill = new Sprite(texture);
+    fill.scale.set(PX);
+    outline.stroke({ width: 3, color: colour, alpha: 0.9 });
+    const c = new Container();
+    c.addChild(fill, outline);
+    return c;
+  };
+
+  /** A dot on every house in a neighbourhood that lies inside. */
+  const houseDots = (inside: (i: number) => boolean, colour: number): Graphics => {
+    const g = new Graphics();
+    for (const h of crowd.trailheads) {
+      for (const [x, y] of h.houseTiles) {
+        if (inside(map.index(x, y))) {
+          g.circle((x + 0.5) * PX, (y + 0.5) * PX, 3);
+        }
+      }
+    }
+    return g.fill(colour).stroke({ width: 1, color: 0xffffff });
   };
 
   let groomMap = false;
@@ -1471,10 +1512,8 @@ async function main() {
       .map((h) => {
         const network = h.entry ? h.network : Math.max(tracks.size, 40);
         if (h.kind === "homes") {
-          const perTen = crowd.fineSaturday(h, clock.day, network, 10 * SKIERS_PER_HOUSE);
-          const served = h.entry ? `${h.served} av ${h.houses} hus bor innen ${HOMES_REACH * map.tileSize} m fra løypa · ${h.today} skiløpere i dag` : `${h.houses} hus, ingen nær løypa ennå`;
-          return `<br><span class="${h.entry ? "plus" : "minus"}">⛷ ${h.name}: ${served}</span><br>
-            <small>Hvert hus innen ${HOMES_REACH * map.tileSize} m fra løypa gir skiløpere: ≈ ${perTen.toFixed(perTen < 1 ? 1 : 0).replace(".", ",")} per 10 hus en fin lørdag</small>`;
+          const served = h.entry ? `${h.served} av ${h.houses} hus nær løypa · ${h.today} i dag` : `${h.houses} hus, ingen nær løypa ennå`;
+          return `<br><span class="${h.entry ? "plus" : "minus"}">⛷ ${h.name}: ${served}</span>`;
         }
         const estimate = Math.round(crowd.fineSaturday(h, clock.day, network));
         return `<br><span class="${h.entry ? "plus" : "minus"}">⛷ ${h.name} (${h.kind === "station" ? "togstasjon" : "parkering"}): ${
@@ -1565,7 +1604,7 @@ async function main() {
       crew.y = y;
       setTool("build");
       showToast(`🏠 Løypelaget har flyttet inn, og Gamle Gunnar har fått tak over hodet! ${document.documentElement.classList.contains("compact")
-        ? "Trykk der løypa skal gå: du ser først hvor den blir lagt fra det røde flagget, som nå står ved garasjen, og trykker «Lag løype». Én finger flytter kartet, to fingre zoomer, og ↶ angrer."
+        ? "Trykk der løypa skal gå: du ser først hvor den blir lagt fra det røde flagget, som nå står ved garasjen, og trykker på den grønne knappen. Én finger flytter kartet, to fingre zoomer, og ↶ angrer."
         : "Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S."} Tiden starter når den første løypa er lagt.`);
     } else {
       setTool(restingTool());
@@ -1912,21 +1951,50 @@ async function main() {
     wall: (x, y) => !tracks.has(x, y) && (tracks.cost(x, y) === null || tracks.obstacle(x, y) !== null),
   };
 
+  const planTile = (x: number, y: number): PlanTile => {
+    if (tracks.has(x, y)) {
+      return { x, y, kind: "track", price: 0 };
+    }
+    const price = tilePrice(x, y);
+    if (price === null) {
+      return { x, y, kind: "blocked", price: 0, reason: tracks.blockReason(x, y) ?? "Kan ikke bygge her" };
+    }
+    return { x, y, kind: tracks.obstacle(x, y) || tracks.passageOnRoad(x, y) ? "crossing" : "new", price };
+  };
+
+  /** A hand-drawn line of tiles as a plan, stopping at the first tile track cannot go on. */
+  const planFromTiles = (tiles: [number, number][]): PlanTile[] => {
+    const out: PlanTile[] = [];
+    for (const [x, y] of tiles) {
+      const t = planTile(x, y);
+      out.push(t);
+      if (t.kind === "blocked") {
+        break;
+      }
+    }
+    return out;
+  };
+
   /** The cheapest way to lay track from a tile to another, around houses, steep ground and costly crossings. */
   const planRoute = (from: [number, number], tx: number, ty: number): PlanTile[] => {
     const route = findRoute(routeGround, from, [tx, ty]);
-    const out: PlanTile[] = route.tiles.map(([x, y]) => {
-      if (tracks.has(x, y)) {
-        return { x, y, kind: "track", price: 0 };
-      }
-      const kind = tracks.obstacle(x, y) || tracks.passageOnRoad(x, y) ? "crossing" : "new";
-      return { x, y, kind, price: tilePrice(x, y)! };
-    });
+    const out: PlanTile[] = route.tiles.map(([x, y]) => planTile(x, y));
     if (!route.complete) {
       const reason = tracks.cost(tx, ty) === null ? tracks.blockReason(tx, ty) ?? "Kan ikke bygge her" : "Finner ingen vei rundt det som er i veien";
       out.push({ x: tx, y: ty, kind: "blocked", price: 0, reason });
     }
     return out;
+  };
+
+  const CONFIRM_LABELS = ["Kjør på!", "Jadda!", "LØØØØYPE!", "Sett i gang!", "Dugnad!"];
+  const confirmLabel = (total: number): string => {
+    if (total > budget) {
+      return "Så langt kassa rekker";
+    }
+    if (total > 50_000) {
+      return Math.random() < 0.5 ? "Bruk penger" : "Styret får vite det etterpå";
+    }
+    return CONFIRM_LABELS[Math.floor(Math.random() * CONFIRM_LABELS.length)];
   };
 
   const PLAN_COLOURS: Record<PlanTile["kind"], number> = { track: 0x1f5fd1, new: 0x2fa84f, crossing: 0xf2c12e, blocked: 0xc0392b };
@@ -1957,6 +2025,18 @@ async function main() {
     }
     const fresh = tiles.filter((t) => t.kind === "new" || t.kind === "crossing");
     const total = fresh.reduce((s, t) => s + t.price, 0);
+    planZone.removeChildren().forEach((c) => c.destroy({ children: true }));
+    const network = reachFrom(map, tracks.each(), HOMES_REACH);
+    const planned = reachFrom(map, fresh.map((t): [number, number] => [t.x, t.y]), HOMES_REACH);
+    const gained = (i: number) => planned[i] <= HOMES_REACH && network[i] > HOMES_REACH;
+    if (fresh.length > 0) {
+      planZone.addChild(zone(gained, PLAN_ZONE), houseDots(gained, PLAN_ZONE));
+    }
+    const newHomes = crowd.trailheads
+      .map((h) => ({ h, n: h.houseTiles.filter(([x, y]) => gained(map.index(x, y))).length }))
+      .filter(({ n }) => n > 0)
+      .sort((a, b) => b.n - a.n);
+    const newHouses = newHomes.reduce((s, { n }) => s + n, 0);
     const crossings = tiles.some((t) => t.kind === "crossing");
     const blocked = tiles.find((t) => t.kind === "blocked");
     const lines: string[] = [];
@@ -1978,10 +2058,17 @@ async function main() {
             : `Krysser Gjøvikbanen: krever undergang til ${kr(crossingOptions("rail", 0)[0].price)}.`;
         });
       lines.push(...new Set(named));
-      const reached = [...new Set(fresh.flatMap((t) => crowd.headsAt(t.x, t.y)).filter((h) => !h.entry))];
-      lines.push(reached.length
-        ? `<span class="plus">⛷ Når fram til ${reached.map((h) => h.name).join(" og ")}: flere skiløpere!</span>`
-        : "Når ingen nye steder, men et lengre løypenett lokker flere med tog og bil.");
+      const reached = [...new Set(fresh.flatMap((t) => crowd.headsAt(t.x, t.y)).filter((h) => !h.entry && h.kind !== "homes"))];
+      if (newHouses > 0) {
+        const names = newHomes.slice(0, 2).map(({ h }) => h.name).join(" og ") + (newHomes.length > 2 ? " m.fl." : "");
+        lines.push(`<span class="plus">⛷ +${newHouses} hus innen ${HOMES_REACH * map.tileSize} m (${names})</span>`);
+      }
+      if (reached.length) {
+        lines.push(`<span class="plus">${reached.map((h) => `${h.kind === "station" ? "🚉" : "🅿"} Når fram til ${h.name}`).join("<br>")}</span>`);
+      }
+      if (newHouses === 0 && reached.length === 0) {
+        lines.push("Ingen nye hus innen rekkevidde, men et lengre løypenett lokker flere med tog og bil.");
+      }
       lines.push(`⛽ ${kr(fresh.length * COST_PER_TILE)} mer i diesel hver gang løypa preppes.`);
       if (blocked) {
         lines.push(`Stopper før: ${(blocked.reason ?? "noe som ikke kan bygges over").toLowerCase()}.`);
@@ -1991,7 +2078,7 @@ async function main() {
       }
     }
     planPanel.innerHTML = `<div class="text">${lines.join("<br>")}</div>
-      <div class="actions">${fresh.length ? `<button data-plan="build">Lag løype</button>` : ""}<button data-plan="cancel">Avbryt</button></div>`;
+      <div class="actions">${fresh.length ? `<button data-plan="build">${confirmLabel(total)}</button>` : ""}<button data-plan="cancel">Avbryt</button></div>`;
     planPanel.hidden = false;
     toast.hidden = true;
     // Keep the whole route in view above the panel, without pushing it under the status line.
@@ -2023,6 +2110,7 @@ async function main() {
     plan = null;
     placement = null;
     planLayer.clear();
+    planZone.removeChildren().forEach((c) => c.destroy({ children: true }));
     planPanel.hidden = true;
     setupPanel.hidden = fleet.garages.length > 0;
   };
@@ -2097,6 +2185,16 @@ async function main() {
   let painting: [number, number] | null = null;
 
   const paintStep = (x: number, y: number) => {
+    if (draft) {
+      const [before, last] = draft.slice(-2);
+      const diagonalToBefore = last && Math.abs(before[0] - x) === 1 && Math.abs(before[1] - y) === 1;
+      if (diagonalToBefore && !tracks.has(last[0], last[1]) && !tracks.obstacle(last[0], last[1])) {
+        draft.pop();
+      }
+      draft.push([x, y]);
+      drawDraft();
+      return;
+    }
     const paid = applyTool(x, y);
     const [before, last] = stroke.slice(-2);
     const diagonalToBefore = last && Math.abs(before.x - x) === 1 && Math.abs(before.y - y) === 1;
@@ -2116,6 +2214,20 @@ async function main() {
 
   app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   let lookHintShown = false;
+  /**
+   * A mouse drag with the build tool: the tiles it has passed over, laid only once the plan it
+   * becomes is confirmed.
+   */
+  let draft: [number, number][] | null = null;
+
+  const drawDraft = () => {
+    planZone.removeChildren().forEach((c) => c.destroy({ children: true }));
+    planLayer.clear();
+    for (const t of planFromTiles(draft ?? [])) {
+      planLayer.rect(t.x * PX + 1, t.y * PX + 1, PX - 2, PX - 2).fill({ color: PLAN_COLOURS[t.kind], alpha: t.kind === "track" ? 0.25 : 0.6 });
+    }
+  };
+
   /** Fingers on the map, for two-finger pan and pinch zoom. */
   const touches = new Map<number, { x: number; y: number }>();
   let pinch: { distance: number; scale: number; wx: number; wy: number; mx: number; my: number } | null = null;
@@ -2214,6 +2326,7 @@ async function main() {
       }
     }
     if (e.button === 0 && tool !== "look") {
+      draft = tool === "build" ? [] : null;
       beginStroke(...tileAt(e.offsetX, e.offsetY));
     } else {
       panning = { x: e.clientX, y: e.clientY };
@@ -2224,6 +2337,16 @@ async function main() {
       tapTile(...pendingTouch.tile);
     }
     pendingTouch = null;
+    if (draft && draft.length > 0) {
+      const tiles = draft;
+      draft = null;
+      if (tiles.some(([x, y]) => !tracks.has(x, y))) {
+        showPlan(tiles[0], planFromTiles(tiles));
+      } else if (!plan) {
+        planLayer.clear();
+      }
+    }
+    draft = null;
     if (painting && stroke.length > 0) {
       lastStroke = stroke.slice();
     }
