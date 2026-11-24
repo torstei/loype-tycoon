@@ -26,7 +26,7 @@ import {
   writeSlot,
 } from "./savegame";
 import { Skijorer } from "./skijor";
-import { Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, reachFrom, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
+import { around, Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, reachFrom, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
@@ -34,6 +34,9 @@ import { landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
 import { Flag, FLAG_NAMES, Terrain, TERRAIN_NAMES } from "./terrain";
 import { askCrossing } from "./crossing";
+import { Alpine, CHAIRLIFT_PRICE } from "./alpine";
+import { nightLights } from "./lights";
+import { Julehus, LIGHTS_DOWN_DAY } from "./christmas";
 import { findRoute, RouteGround } from "./route";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
@@ -165,7 +168,8 @@ async function main() {
   const headLabels = new Container();
   const skijorer = new Skijorer(map);
   const kioskLayer = new Container();
-  world.addChild(trackLayer, trailheadLayer, fleet.garageLayer, kioskLayer, fleet.machineLayer, crowd.layer, skijorer.layer, headLabels);
+  const alpine = new Alpine(map);
+  world.addChild(alpine.layer, trackLayer, trailheadLayer, fleet.garageLayer, kioskLayer, fleet.machineLayer, crowd.layer, skijorer.layer, headLabels);
   const cursor = new Graphics();
   const endsLayer = new Graphics();
   const refusalTag = new Container();
@@ -188,7 +192,9 @@ async function main() {
   world.addChild(planZone, planLayer, endsLayer, refusalTag);
   const night = new Graphics();
   const lightsWorld = new Container();
-  lightsWorld.addChild(crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
+  const townLights = nightLights(map);
+  const julehus = new Julehus();
+  lightsWorld.addChild(townLights, julehus.lights, alpine.lights, crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
   const precipitation = new Precipitation();
   app.stage.addChild(night, lightsWorld, precipitation.layer);
   const ledger = {
@@ -212,7 +218,7 @@ async function main() {
 
   const camera = new Camera(world);
   if (new URLSearchParams(location.search).has("debug")) {
-    Object.assign(window, { loype: { map, world, camera, whimsy, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks,
+    Object.assign(window, { loype: { map, world, camera, whimsy, alpine, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks,
       fastForward: (hours: number, step?: number) => fastForward(hours, step), history: () => history,
       cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition() } });
   }
@@ -238,6 +244,8 @@ async function main() {
     tracks.applyWeather(hours, weather, snow, rain);
     fleet.update(hours, clock.hours, clock.hourOfDay, tracks, weather, ledger);
     crowd.update(hours, clock, weather, tracks);
+    alpine.update(hours, clock, weather);
+    crowd.liftRunning = alpine.hasChairlift && alpine.isOpen(clock, weather);
     skijorer.update(hours, clock, tracks);
     whimsy.simulate(hours, tracks, clock.hours, (x, y) => crowd.near(x, y, 5));
   };
@@ -313,6 +321,7 @@ async function main() {
     }
     calendar();
     const darkness = 1 - clock.daylight();
+    townLights.alpha = Math.min(1, Math.max(0, (darkness - 0.2) / 0.5));
     night.clear().rect(0, 0, app.screen.width, app.screen.height).fill({ color: 0x0b1a3a, alpha: darkness * 0.5 });
     lightsWorld.position.copyFrom(world.position);
     lightsWorld.scale.copyFrom(world.scale);
@@ -325,6 +334,8 @@ async function main() {
     detail.visible = detail.alpha > 0;
     whimsy.detail = s >= OVERVIEW_BELOW;
     crowd.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight());
+    alpine.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight());
+    julehus.animate(dt, clock.day, 1 - clock.daylight(), s >= OVERVIEW_BELOW);
     skijorer.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight(), crowd.lights);
     headLabels.visible = s >= OVERVIEW_BELOW;
     for (const label of headLabels.children) {
@@ -548,6 +559,7 @@ async function main() {
   let kioskUpgradedToday = false;
   let kioskBrokenToday = false;
   let expertsHiredToday = false;
+  let chairliftToday: string | null = null;
   let cabinClaimedToday: string | null = null;
   let cabinBuiltToday: string | null = null;
 
@@ -569,6 +581,74 @@ async function main() {
     kioskPanel.hidden = false;
     renderKiosk();
   };
+  const liftPanel = document.getElementById("lift")!;
+  let liftShown: string | null = null;
+
+  /** The chair-lift's top station: cross-country skiers ride up and set off from there. */
+  const openChairliftHead = () => {
+    const top = alpine.topStation;
+    const lift = alpine.mainLift;
+    if (!top || !lift) {
+      return;
+    }
+    const x = Math.floor(top[0]);
+    const y = Math.floor(top[1]);
+    const reach = 4;
+    crowd.addTrailhead({ kind: "lift", name: `toppen av ${lift.name}`, x, y, rate: 7, reach, houses: 0, served: 0, houseTiles: [], catchment: around(map, [[x, y]], reach), entry: null, network: 0, today: 0 });
+    trailheadSignature = "";
+    refreshTrailheads();
+  };
+
+  const renderLift = () => {
+    const lift = alpine.lifts.find((l) => l.name === liftShown);
+    if (!lift) {
+      liftPanel.hidden = true;
+      return;
+    }
+    const open = alpine.isOpen(clock, weather);
+    const main = lift === alpine.mainLift;
+    const top = alpine.topStation!;
+    const topElevation = map.elevationAt(Math.floor(top[0]), Math.floor(top[1]));
+    const bottom = lift.line.pts[0];
+    const bottomElevation = map.elevationAt(Math.floor(bottom[0]), Math.floor(bottom[1]));
+    const extraSnow = Math.max(0, Math.round(weather.snowDepthAt(topElevation) - weather.snowDepthAt(bottomElevation)));
+    const head = crowd.trailheads.find((h) => h.kind === "lift");
+    const status = `${lift.chair ? "Stolheis" : "Skitrekk"} · ${open ? `åpent nå · ${alpine.people} i bakkene` : "åpent 17–21 på hverdager og 10–16 i helgene, når det er snø"}`;
+    const offer = !main
+      ? `<p class="note">Et av skitrekkene i Varingskollen. Det lengste, ${alpine.mainLift?.name}, kan bli stolheis.</p>`
+      : lift.chair
+        ? `<table><tr class="current"><td><strong>Stolheisen går</strong><br><small>${head?.entry ? `Langrennsløpere tar heisen opp og går ut fra toppen: ${head.today} i dag.` : "Legg løype fra toppstasjonen, så tar langrennsløperne heisen opp."}</small></td><td><span class="owned">✓ Spleiset</span></td></tr></table>`
+        : `<table><tr><td><strong>Stolheis</strong><br><small>I Varingskollen har det lenge vært snakk om å bytte ut ${lift.name} med stolheis. Løypelaget kan spleise: da kommer langrennsfolk også til topps, med skiene på beina og stavene i fanget.</small><br>
+          <small class="facts">Ny startplass ved toppstasjonen, ${topElevation} moh · ${extraSnow > 0 ? `${extraSnow} cm mer snø enn ved bunnen i dag` : "snøen ligger lengst der oppe"} · går når bakken er åpen</small></td>
+          <td><button data-lift="chair" ${CHAIRLIFT_PRICE > budget ? "disabled" : ""}>Spleis ${kr(CHAIRLIFT_PRICE)}</button></td></tr></table>
+          <p class="note">Løypelagets andel. Resten tar alpinbakken og en sparebankstiftelse med sans for heiser.</p>`;
+    liftPanel.innerHTML = `
+      <div class="head"><strong>🚡 ${lift.name}</strong><button data-lift="close">✕</button></div>
+      <p class="status">${status}</p>
+      ${offer}`;
+  };
+
+  const openLift = (name: string) => {
+    liftShown = name;
+    liftPanel.hidden = false;
+    renderLift();
+  };
+
+  liftPanel.addEventListener("click", (e) => {
+    const action = (e.target as HTMLElement).closest("button")?.dataset.lift;
+    if (action === "close") {
+      liftPanel.hidden = true;
+    } else if (action === "chair" && !alpine.hasChairlift && CHAIRLIFT_PRICE <= budget) {
+      budget -= CHAIRLIFT_PRICE;
+      alpine.buildChairlift();
+      openChairliftHead();
+      chairliftToday = alpine.mainLift?.name ?? null;
+      showToast("🚡 <strong>Stolheis i Varingskollen!</strong> Legg løype fra toppstasjonen, så tar langrennsløperne heisen opp når bakken er åpen.");
+      renderLift();
+      refreshHud();
+    }
+  });
+
   const openCabin = (x: number, y: number) => {
     outletTarget = { kind: "cabin", x, y };
     kioskPanel.hidden = false;
@@ -968,6 +1048,7 @@ async function main() {
       kioskBought: kioskBoughtToday,
       kioskUpgrade: kioskUpgradedToday,
       expertsHired: expertsHiredToday,
+      chairlift: chairliftToday,
       cabinClaimed: cabinClaimedToday,
       cabinBuilt: cabinBuiltToday,
       guests,
@@ -981,6 +1062,7 @@ async function main() {
     kioskUpgradedToday = false;
     kioskBrokenToday = false;
     expertsHiredToday = false;
+    chairliftToday = null;
     cabinClaimedToday = null;
     cabinBuiltToday = null;
     snowToday = 0;
@@ -1213,7 +1295,7 @@ async function main() {
       }
       const radius = 4 + Math.sqrt(h.kind === "homes" ? h.houses * SKIERS_PER_HOUSE : h.rate) * 1.6;
       g.circle(cx, cy, radius).fill(h.entry ? 0x1f8a3a : 0x6f8197).stroke({ width: 1.5, color: 0xffffff });
-      const icon = new Text({ text: h.kind === "station" ? "🚉" : h.kind === "parking" ? "P" : "⛷", style: { fontSize: radius * 1.2, fill: 0xffffff, fontWeight: "700" }, resolution: 4 });
+      const icon = new Text({ text: h.kind === "station" ? "🚉" : h.kind === "parking" ? "P" : h.kind === "lift" ? "🚡" : "⛷", style: { fontSize: radius * 1.2, fill: 0xffffff, fontWeight: "700" }, resolution: 4 });
       icon.anchor.set(0.5);
       icon.position.set(cx, cy);
       trailheadLayer.addChild(g, icon);
@@ -1516,7 +1598,7 @@ async function main() {
           return `<br><span class="${h.entry ? "plus" : "minus"}">⛷ ${h.name}: ${served}</span>`;
         }
         const estimate = Math.round(crowd.fineSaturday(h, clock.day, network));
-        return `<br><span class="${h.entry ? "plus" : "minus"}">⛷ ${h.name} (${h.kind === "station" ? "togstasjon" : "parkering"}): ${
+        return `<br><span class="${h.entry ? "plus" : "minus"}">⛷ ${h.name} (${h.kind === "station" ? "togstasjon" : h.kind === "lift" ? "stolheis" : "parkering"}): ${
           h.entry ? `koblet til løypa · ${h.today} skiløpere i dag` : "ingen løype her ennå"
         } · ≈ ${estimate} en fin lørdag</span>`;
       })
@@ -1892,6 +1974,11 @@ async function main() {
       openCabin(cabin.x, cabin.y);
       return;
     }
+    const station = tool === "build" ? alpine.stationNear(tx, ty) : undefined;
+    if (station) {
+      openLift(station.name);
+      return;
+    }
     if (tool === "remove") {
       [crew.x, crew.y] = [tx, ty];
       if (tracks.has(tx, ty)) {
@@ -2064,7 +2151,7 @@ async function main() {
         lines.push(`<span class="plus">⛷ +${newHouses} hus innen ${HOMES_REACH * map.tileSize} m (${names})</span>`);
       }
       if (reached.length) {
-        lines.push(`<span class="plus">${reached.map((h) => `${h.kind === "station" ? "🚉" : "🅿"} Når fram til ${h.name}`).join("<br>")}</span>`);
+        lines.push(`<span class="plus">${reached.map((h) => `${h.kind === "station" ? "🚉" : h.kind === "lift" ? "🚡" : "🅿"} Når fram til ${h.name}`).join("<br>")}</span>`);
       }
       if (newHouses === 0 && reached.length === 0) {
         lines.push("Ingen nye hus innen rekkevidde, men et lengre løypenett lokker flere med tog og bil.");
@@ -2322,6 +2409,24 @@ async function main() {
       const cabin = cabinNear(lx, ly, 1);
       if (cabin) {
         openCabin(cabin.x, cabin.y);
+        return;
+      }
+      const lift = alpine.liftNear(lx, ly);
+      if (lift) {
+        openLift(lift.name);
+        return;
+      }
+      if (julehus.near(lx, ly)) {
+        showToast(clock.day <= LIGHTS_DOWN_DAY
+          ? "🎄 <strong>Julehuset i Hadelandsveien</strong> – et lokalt landemerke. Tusenvis av lys, reinsdyr på plenen, og fast plass i Varingen hver desember. Best etter mørkets frembrudd."
+          : "🎄 <strong>Julehuset i Hadelandsveien</strong> – lysene ble tatt ned på tjugendedag. Kom tilbake i desember.");
+        return;
+      }
+    }
+    if (e.button === 0 && tool === "build") {
+      const station = alpine.stationNear(...tileAt(e.offsetX, e.offsetY));
+      if (station) {
+        openLift(station.name);
         return;
       }
     }
@@ -2582,6 +2687,7 @@ async function main() {
       showReport(false);
       showPaper(false);
       kioskPanel.hidden = true;
+      liftPanel.hidden = true;
       closeMenus();
       clearPlan();
     } else {
@@ -2622,6 +2728,7 @@ async function main() {
     crew: map.toGrid(crew.x, crew.y),
     varingen: { ...paper, press: crowd.press, roadsToday, snowToday, rainToday },
     accounts: { history, dayStartBudget },
+    alpine: { chairlift: alpine.hasChairlift },
   });
 
   /** Rebuild a saved game on this freshly started page. Returns what to tell the player. */
@@ -2672,6 +2779,10 @@ async function main() {
       reports.push({ report: { day: r.day, honest: r.honest, rosy: r.rosy, headline: r.headline as Report["headline"] }, rosy: r.rosyChosen });
     }
     reportIndex = reports.length - 1;
+    if (save.alpine?.chairlift && !alpine.hasChairlift) {
+      alpine.buildChairlift();
+      openChairliftHead();
+    }
     if (save.varingen) {
       const v = save.varingen;
       Object.assign(paper, { editions: v.editions, week: v.week, kmAtLastEdition: v.kmAtLastEdition, bestWeek: v.bestWeek, lastDay: v.lastDay, pressUntil: v.pressUntil });

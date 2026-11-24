@@ -7,6 +7,20 @@ export interface Poi {
   y: number;
 }
 
+/** A ski lift from OpenStreetMap: kind is its aerialway tag, such as drag_lift or chair_lift. */
+export interface AlpineLift {
+  kind: string;
+  name: string | null;
+  pts: [number, number][];
+}
+
+/** A downhill slope, drawn as a line. */
+export interface AlpineSlope {
+  name: string | null;
+  lit: boolean;
+  pts: [number, number][];
+}
+
 export interface MapLine {
   /** road_name lines are not drawn; they only say which road is where. */
   kind: "road" | "forest_road" | "rail" | "path" | "stream" | "piste" | "road_name";
@@ -46,6 +60,7 @@ interface MapDocument {
   elevation: number[];
   pois: Poi[];
   lines: MapLine[];
+  alpine?: { lifts: AlpineLift[]; slopes: AlpineSlope[] };
   attribution: string;
 }
 
@@ -63,6 +78,7 @@ export class GameMap {
   readonly elevation: Int16Array;
   readonly pois: Poi[];
   readonly lines: MapLine[];
+  readonly alpine: { lifts: AlpineLift[]; slopes: AlpineSlope[] } | undefined;
   readonly attribution: string;
 
   constructor(doc: MapDocument) {
@@ -81,6 +97,7 @@ export class GameMap {
     this.elevation = Int16Array.from(doc.elevation);
     this.pois = doc.pois;
     this.lines = doc.lines;
+    this.alpine = doc.alpine;
     this.attribution = doc.attribution;
   }
 

@@ -159,24 +159,24 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 
 #fleet button.kiosk { margin-left: auto; font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid #c9a045;
   background: #fff7e0; border-radius: 10px; cursor: pointer; white-space: nowrap; }
-#kiosk { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px));
+#kiosk, #lift { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 140px); overflow-y: auto; padding: 12px 16px; background: #fffaf0; border: 3px solid #8a5a30;
   border-radius: 10px; z-index: 8; box-shadow: 0 12px 40px rgba(10, 20, 40, 0.4); font-size: 14px; }
-#kiosk[hidden] { display: none; }
-#kiosk .head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
-#kiosk .head button { font: inherit; border: none; background: none; font-size: 18px; cursor: pointer; }
-#kiosk .status { margin: 6px 0 8px; color: #5a3a20; }
-#kiosk table { width: 100%; border-collapse: collapse; }
-#kiosk td { padding: 7px 0; vertical-align: top; }
-#kiosk td:last-child { text-align: right; white-space: nowrap; padding-left: 10px; }
-#kiosk tr + tr { border-top: 1px solid #ecdcc4; }
-#kiosk tr.current { background: #fff1cc; }
-#kiosk small { color: #6a5a4a; }
-#kiosk small.facts { color: #8a5a30; }
-#kiosk button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid #8a5a30; background: #fff; border-radius: 4px; cursor: pointer; }
-#kiosk button:disabled { opacity: 0.4; cursor: default; }
-#kiosk .owned { color: #1f8a3a; font-weight: 600; }
-#kiosk .note { margin: 8px 0 0; font-size: 12px; color: #6a5a4a; }
+#kiosk[hidden], #lift[hidden] { display: none; }
+#kiosk .head, #lift .head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+#kiosk .head button, #lift .head button { font: inherit; border: none; background: none; font-size: 18px; cursor: pointer; }
+#kiosk .status, #lift .status { margin: 6px 0 8px; color: #5a3a20; }
+#kiosk table, #lift table { width: 100%; border-collapse: collapse; }
+#kiosk td, #lift td { padding: 7px 0; vertical-align: top; }
+#kiosk td:last-child, #lift td:last-child { text-align: right; white-space: nowrap; padding-left: 10px; }
+#kiosk tr + tr, #lift tr + tr { border-top: 1px solid #ecdcc4; }
+#kiosk tr.current, #lift tr.current { background: #fff1cc; }
+#kiosk small, #lift small { color: #6a5a4a; }
+#kiosk small.facts, #lift small.facts { color: #8a5a30; }
+#kiosk button, #lift button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid #8a5a30; background: #fff; border-radius: 4px; cursor: pointer; }
+#kiosk button:disabled, #lift button:disabled { opacity: 0.4; cursor: default; }
+#kiosk .owned, #lift .owned { color: #1f8a3a; font-weight: 600; }
+#kiosk .note, #lift .note { margin: 8px 0 0; font-size: 12px; color: #6a5a4a; }
 
 #loading[hidden] { display: none; }
 #touch-tips { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgba(15, 30, 60, 0.45); }
@@ -245,7 +245,7 @@ html.compact #help { display: none; }
 html.compact #legend { left: 8px; bottom: calc(var(--bar) + 60px); font-size: 12px; }
 html.compact #attribution { bottom: calc(var(--bar) + 2px); font-size: 9px; opacity: 0.7; }
 html.compact #paused { font-size: 13px; padding: 6px 12px; max-width: calc(100vw - 24px); white-space: normal; }
-html.compact #crossing .card, html.compact #game-menu, html.compact #kiosk { max-height: calc(100dvh - 24px); overflow-y: auto;
+html.compact #crossing .card, html.compact #game-menu, html.compact #kiosk, html.compact #lift { max-height: calc(100dvh - 24px); overflow-y: auto;
   box-sizing: border-box; width: calc(100vw - 16px); }
 html.compact #setup, html.compact #report, html.compact #paper, html.compact #forecast.open { box-sizing: border-box; }
 html.compact #setup { width: calc(100vw - 16px); }
