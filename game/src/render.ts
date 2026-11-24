@@ -1,5 +1,6 @@
 import { GameMap, MapLine } from "./map";
 import { Flag, Terrain } from "./terrain";
+import { MAX_SLOPE } from "./tracks";
 
 export const PX = 16;
 
@@ -15,6 +16,8 @@ export const mix = (c: RGB, k: number): RGB => [c[0] * k, c[1] * k, c[2] * k];
 
 /** Snow is drawn in a few flat bands, cartoon style, with blue shadows. */
 const SNOW_BANDS: [number, RGB][] = [
+  [0.62, [134, 156, 204]],
+  [0.74, [156, 176, 216]],
   [0.86, [178, 196, 226]],
   [0.95, [208, 221, 240]],
   [1.06, [236, 242, 250]],
@@ -47,12 +50,15 @@ export interface TileRect {
 export interface LandscapeFields {
   shade: Float32Array;
   elev: Float32Array;
+  /** Slope in percent, zero on graded roads. */
+  slope: Float32Array;
 }
 
 export function landscapeFields(map: GameMap): LandscapeFields {
   return {
     shade: tileField(map, (x, y) => lightAt(map, x, y)),
     elev: tileField(map, (x, y) => map.elevationAt(x, y)),
+    slope: tileField(map, (x, y) => (map.flags[map.index(x, y)] & GRADED ? 0 : map.slopeAt(x, y))),
   };
 }
 
@@ -71,14 +77,16 @@ export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeF
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
 
   const cls = smoothTerrain(map, ctx, rect, PX);
-  const { shade, elev } = fields;
+  const { shade, elev, slope } = fields;
 
   const img = ctx.createImageData(W, H);
   const d = img.data;
   const band = new Int16Array(W * H);
+  const crag = new Float32Array(W * H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       band[y * W + x] = Math.floor(sample(map, elev, ox + x, oy + y) / CONTOUR_M);
+      crag[y * W + x] = Math.min(1, Math.max(0, (sample(map, slope, ox + x, oy + y) - MAX_SLOPE + 4) / 8));
     }
   }
 
@@ -127,6 +135,11 @@ export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeF
       if (t !== Terrain.Water && (band[i] !== band[i + 1] || band[i] !== band[i + W])) {
         c = mix(c, 0.9);
       }
+      if (crag[i] > 0 && t !== Terrain.Water && t !== Terrain.Built) {
+        const k = crag[i] * 0.45;
+        const rock = mix([146, 160, 190], Math.min(1.1, s));
+        c = [c[0] + (rock[0] - c[0]) * k, c[1] + (rock[1] - c[1]) * k, c[2] + (rock[2] - c[2]) * k];
+      }
       const o = i * 4;
       d[o] = c[0];
       d[o + 1] = c[1];
@@ -138,8 +151,9 @@ export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeF
 
   ctx.save();
   ctx.translate(-ox, -oy);
+  drawSlopes(map, ctx, rect, fields.slope);
   drawLines(map, ctx, LINE_STYLES, PX, rect);
-  drawSprites(map, ctx, cls, rect);
+  drawSprites(map, ctx, cls, rect, fields.slope);
   ctx.restore();
   return canvas;
 }
@@ -213,13 +227,81 @@ export function renderChunk(map: GameMap, cx: number, cy: number, fields: Landsc
   return out;
 }
 
+/** Slope in percent from which ground gets hachures; above MAX_SLOPE the snowcat cannot go. */
+const HACHURE_FROM = 25;
+const GRADED = Flag.Road | Flag.ForestRoad;
+
+/** Downhill unit vector at a tile. */
+function downhill(map: GameMap, x: number, y: number): [number, number] {
+  const e = (dx: number, dy: number) =>
+    map.elevationAt(Math.min(map.width - 1, Math.max(0, x + dx)), Math.min(map.height - 1, Math.max(0, y + dy)));
+  const gx = e(1, 0) - e(-1, 0);
+  const gy = e(0, 1) - e(0, -1);
+  const len = Math.hypot(gx, gy) || 1;
+  return [-gx / len, -gy / len];
+}
+
+/**
+ * Steep ground: a hachure pointing downhill, longer the steeper, and where the snowcat cannot
+ * go, soft streaks down the fall line.
+ */
+function drawSlopes(map: GameMap, ctx: CanvasRenderingContext2D, rect: TileRect, slope: Float32Array) {
+  const hachures = new Path2D();
+  const gullies = new Path2D();
+  const ridges = new Path2D();
+  for (let ty = rect.y; ty < rect.y + rect.h; ty++) {
+    for (let tx = rect.x; tx < rect.x + rect.w; tx++) {
+      const s = slope[map.index(tx, ty)];
+      const t = map.terrainAt(tx, ty);
+      if (s < HACHURE_FROM || t === Terrain.Water || t === Terrain.Built) {
+        continue;
+      }
+      const [dx, dy] = downhill(map, tx, ty);
+      if (s > MAX_SLOPE) {
+        for (let k = 0; k < 3; k++) {
+          const off = (k - 1) * PX * 0.33 + (hash(tx, ty, 84 + k) - 0.5) * PX * 0.2;
+          const len = PX * (1.6 + hash(tx, ty, 86 + k) * 0.8);
+          const sx = (tx + 0.5) * PX - dy * off - dx * len * 0.5;
+          const sy = (ty + 0.5) * PX + dx * off - dy * len * 0.5;
+          const wdt = 0.9 + hash(tx, ty, 88 + k) * 0.6;
+          gullies.moveTo(sx - dy * wdt, sy + dx * wdt);
+          gullies.lineTo(sx + dx * len, sy + dy * len);
+          gullies.lineTo(sx + dy * wdt, sy - dx * wdt);
+          gullies.closePath();
+          ridges.moveTo(sx + dy * (wdt + 1.2), sy - dx * (wdt + 1.2));
+          ridges.lineTo(sx + dx * len * 0.8 + dy * 1.2, sy + dy * len * 0.8 - dx * 1.2);
+        }
+        continue;
+      }
+      const len = PX * (0.35 + (s - HACHURE_FROM) / 30);
+      const off = (hash(tx, ty, 80) - 0.5) * PX * 0.5;
+      const sx = (tx + 0.5) * PX - dy * off - dx * len / 2;
+      const sy = (ty + 0.5) * PX + dx * off - dy * len / 2;
+      hachures.moveTo(sx, sy);
+      hachures.lineTo(sx + dx * len, sy + dy * len);
+    }
+  }
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(104, 128, 186, 0.7)";
+  ctx.lineWidth = 1.3;
+  ctx.stroke(hachures);
+  ctx.filter = "blur(0.8px)";
+  ctx.fillStyle = "rgba(64, 78, 120, 0.4)";
+  ctx.fill(gullies);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+  ctx.lineWidth = 0.9;
+  ctx.stroke(ridges);
+  ctx.filter = "none";
+}
+
 export function lightAt(map: GameMap, x: number, y: number): number {
   const e = (dx: number, dy: number) =>
     map.elevationAt(Math.min(map.width - 1, Math.max(0, x + dx)), Math.min(map.height - 1, Math.max(0, y + dy)));
   const gx = (e(1, 0) - e(-1, 0)) / (2 * map.tileSize);
   const gy = (e(0, 1) - e(0, -1)) / (2 * map.tileSize);
-  // Light from the north-west, as on Norwegian topo maps.
-  return 1 - (gx + gy) * 0.9;
+  // Light from the north-west, as on Norwegian topo maps; steep ground gets harder light so it reads as steep.
+  const steep = Math.min(1, Math.max(0, (Math.hypot(gx, gy) - 0.2) / 0.25));
+  return 1 - (gx + gy) * 0.9 * (1 + steep * 1.6);
 }
 
 export function tileField(map: GameMap, f: (x: number, y: number) => number): Float32Array {
@@ -405,6 +487,61 @@ const boulder = sprite(9, 7, (g) => {
   g.fill();
 });
 
+/** A jagged, snow-capped crag, for ground too steep for the snowcat. */
+function crag(w: number, h: number, peaks: number, seed: number): HTMLCanvasElement {
+  return sprite(w + 2, h + 2, (g) => {
+    const base = h + 1;
+    const ridge: [number, number][] = [[1, base]];
+    for (let k = 0; k < peaks; k++) {
+      const px = 1 + (w * (k + 0.5)) / peaks + (hash(k, seed, 1) - 0.5) * (w / peaks) * 0.5;
+      const top = 1 + hash(k, seed, 2) * h * 0.35 + (k === Math.floor(peaks / 2) ? 0 : h * 0.15);
+      ridge.push([px, top]);
+      if (k < peaks - 1) {
+        ridge.push([1 + (w * (k + 1)) / peaks, top + h * (0.25 + hash(k, seed, 3) * 0.2)]);
+      }
+    }
+    ridge.push([1 + w, base]);
+    const outline = () => {
+      g.beginPath();
+      ridge.forEach(([x, y], k) => (k === 0 ? g.moveTo(x, y) : g.lineTo(x, y)));
+      g.closePath();
+    };
+    g.lineJoin = "round";
+    outline();
+    g.fillStyle = "#9aa2b4";
+    g.fill();
+    g.save();
+    g.clip();
+    for (let k = 1; k < ridge.length - 1; k += 2) {
+      const [px, py] = ridge[k];
+      g.beginPath();
+      g.moveTo(px, py);
+      g.lineTo(px + w / peaks * 0.7, base);
+      g.lineTo(px + w, base);
+      g.lineTo(px + w, py);
+      g.closePath();
+      g.fillStyle = "#6c7389";
+      g.fill();
+      g.beginPath();
+      g.moveTo(px, py - 1);
+      g.lineTo(px - w / peaks * 0.55, py + h * 0.45);
+      g.lineTo(px - w / peaks * 0.15, py + h * 0.3);
+      g.lineTo(px + w / peaks * 0.08, py + h * 0.42);
+      g.lineTo(px + w / peaks * 0.25, py + h * 0.22);
+      g.closePath();
+      g.fillStyle = "#f6f9fd";
+      g.fill();
+    }
+    g.restore();
+    outline();
+    g.strokeStyle = "#3f4556";
+    g.lineWidth = 1;
+    g.stroke();
+  });
+}
+
+const CRAGS = [crag(14, 11, 2, 1), crag(18, 12, 3, 2), crag(11, 10, 1, 3), crag(20, 13, 3, 4), crag(15, 12, 2, 5)];
+
 const tuft = sprite(5, 5, (g) => {
   g.strokeStyle = "#b8974e";
   g.lineWidth = 1;
@@ -428,7 +565,7 @@ const HOUSES = ["#b8433a", "#b8433a", "#c9a045", "#eef0f0", "#8a3b34"].map(house
 const NO_TREES = Flag.Road | Flag.Rail | Flag.Building | Flag.ForestRoad;
 
 /** Trees, houses, boulders and tufts for a rectangle, drawn in global pixel coordinates. */
-function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array, rect: TileRect) {
+function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array, rect: TileRect, slope: Float32Array) {
   const W = rect.w * PX;
   const H = rect.h * PX;
   const items: { x: number; y: number; img: HTMLCanvasElement; shadow: number }[] = [];
@@ -441,8 +578,15 @@ function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Arra
         items.push({ ...housePosition(tx, ty), img, shadow: 6 });
         continue;
       }
+      const steep = slope[map.index(tx, ty)] > MAX_SLOPE && t !== Terrain.Water && t !== Terrain.Built;
+      if (steep) {
+        if (hash(tx, ty, 43) < 0.1) {
+          const img = CRAGS[Math.floor(hash(tx, ty, 44) * CRAGS.length)];
+          items.push({ x: tx * PX + 8 - img.width / 2 + (hash(tx, ty, 46) - 0.5) * 6, y: ty * PX + 8 + hash(tx, ty, 48) * 8, img, shadow: img.width * 0.4 });
+        }
+      }
       if (t === Terrain.Forest && !(flags & NO_TREES)) {
-        const count = 2 + (hash(tx, ty, 1) < 0.5 ? 1 : 0) - (flags & Flag.Path ? 1 : 0);
+        const count = steep ? (hash(tx, ty, 1) < 0.5 ? 1 : 0) : 2 + (hash(tx, ty, 1) < 0.5 ? 1 : 0) - (flags & Flag.Path ? 1 : 0);
         for (let k = 0; k < count; k++) {
           const x = tx * PX + 2 + hash(tx, ty, 10 + k) * 12;
           const y = ty * PX + 3 + hash(tx, ty, 20 + k) * 13;

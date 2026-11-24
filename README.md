@@ -66,7 +66,9 @@ Controls (press `H` in the game for the full list):
   reach. Anywhere else costs a new underpass at 120 000 kr. At a level crossing the skiers and
   the snowcat wait for the barriers; through a bridge or underpass that carries a road the
   track has to share the asphalt, priced and felt like crossing that road. Roads and forest
-  roads can be followed however steep the hillside beside them.
+  roads can be followed however steep the hillside beside them. Steep ground shows on the
+  map: hillsides get harder light and shadow, ground over 25 % gets short strokes pointing
+  downhill, and ground over 40 %, too steep for the snowcat, gets streaks down the fall line.
 - **Grooming**: tool `4` places another garage next to the track, with a new machine
   (80 000 kr). Machines go out when tracks need it (by default only at night),
   groom their way round the network and drive home. Diesel is paid per tile groomed.
