@@ -38,6 +38,7 @@ export function showStartupError(err: unknown) {
     return;
   }
   document.getElementById("loading")?.remove();
+  document.getElementById("start")?.remove();
   const box = document.createElement("div");
   box.id = "startup-error";
   box.innerHTML = `
