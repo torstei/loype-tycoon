@@ -635,7 +635,11 @@ def write_region_file(path, region):
             "trainEnds": [],
             "skiArea": "alpinbakken",
             "waffleClub": f"{t} Skytterlag",
+            "at": f"i {t}",
+            "locals": "folk i bygda",
+            "shop": "butikken",
         },
+        "texts": {"groupPosts": [], "letters": [], "lowlandNews": []},
         "places": {"rename": {}, "hide": [], "add": []},
     }
     path.write_text(json.dumps(starter, ensure_ascii=False, indent=2) + "\n")

@@ -1,15 +1,68 @@
 {
   "title": "Hakadal",
-  "start": { "place": "Hakadal", "kind": "station" },
+  "start": {
+    "place": "Hakadal",
+    "kind": "station"
+  },
   "names": {
     "newspaper": "Varingen",
     "group": "Preppestatus Hakadal og omegn",
     "unofficialGroup": "Skiføre i Hakadal (uoffisiell)",
     "railway": "Gjøvikbanen",
-    "trainEnds": ["Gjøvik", "Oslo S"],
+    "trainEnds": [
+      "Gjøvik",
+      "Oslo S"
+    ],
     "skiArea": "Varingskollen",
-    "waffleClub": "Nittedal Skytterlag"
+    "waffleClub": "Nittedal Skytterlag",
+    "at": "i Hakadal",
+    "locals": "hakadølene",
+    "neighbourhoods": [
+      "Hakadals verk",
+      "Ekra",
+      "Skansen",
+      "Sagstua",
+      "Mork",
+      "Kirkeby",
+      "Kirkebylia"
+    ],
+    "lowland": {
+      "name": "Rotnes",
+      "heading": "Sør i bygda",
+      "places": [
+        "Rotnes",
+        "Hagan",
+        "Slattum",
+        "Nittedal sentrum",
+        "Sørbygda"
+      ]
+    },
+    "mainRoad": "Rv. 4",
+    "shop": "7-Eleven i Hakadal"
   },
-  "climate": { "valley": 200, "high": 500 },
-  "christmasHouse": { "lat": 60.097103, "lon": 10.867278, "street": "Hadelandsveien" }
+  "climate": {
+    "valley": 200,
+    "high": 500
+  },
+  "christmasHouse": {
+    "lat": 60.097103,
+    "lon": 10.867278,
+    "street": "Hadelandsveien"
+  },
+  "texts": {
+    "groupPosts": [
+      "Hvem eier den blå Volvoen som står på tvers på P Hakadal?",
+      "Løypemaskina sto midt i {vei} i går kveld. Kø helt til Grua. 😡"
+    ],
+    "lowlandNews": [
+      "Rotnes-beboere oppdaget i helgen at bygda fortsetter nord for Kirkeby. – Det sto ingenting om det på skiltet, sier en av dem.",
+      "Velforeningen på Rotnes understreker at det grønne i hagene er et bevisst valg.",
+      "I Nittedal sentrum vurderer man å omtale sludd som «kystsnø».",
+      "Sørbygda arrangerer også i år «Ski i hagen»-dugnad. Snø medbringes.",
+      "En Rotnes-familie ble observert i Hakadal med ski på taket og solbriller i håret. De lette etter «snøen dere snakker om».",
+      "Slattum melder om tre centimeter snø. To av dem var på en bil fra Hakadal.",
+      "Hagan har fått sitt første snøfnugg. Det er stilt ut på biblioteket.",
+      "– Vi har snø i sør også, sier en mann på Rotnes og viser frem et bilde fra 2010."
+    ]
+  }
 }

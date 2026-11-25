@@ -60,7 +60,7 @@ const COMPLAINTS = {
   road: ["Ta av skiene, ta på skiene…", "Bilene stopper ikke for skiløpere!", "Hvem legger løype over en bilvei?", "Asfalt. Mine stakkars ski."],
   moose: ["Elgen har vært her igjen!", "Hull i sporet. Takk, elg.", "Klassisk spor med elgmønster.", "Noen bør snakke med den elgen."],
   rail: ["Bommen er nede. Igjen.", "Ti minutter for ett godstog!", "Planovergang med ski på beina. Det er sånt man forteller barnebarna om.", "Toget var forsinket, så nå venter vi på det også."],
-  trunk: ["Et vogntog! Et VOGNTOG!", "Jeg har stått her i ti minutter!", "Hvem fant på å legge løypa over Rv. 4?!", "Livet passerte revy. To ganger."],
+  trunk: ["Et vogntog! Et VOGNTOG!", "Jeg har stått her i ti minutter!", "Hvem fant på å legge løypa over riksveien?!", "Livet passerte revy. To ganger."],
 };
 
 const MAX_VERDICTS = 5000;

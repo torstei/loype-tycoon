@@ -1,5 +1,5 @@
 import { MAX_SEASON_DAYS } from "./clock";
-import { region } from "./region";
+import { neighbourhood, region } from "./region";
 
 // The weather is for the region's valley floor; a second snowpack higher up is colder, so more snow and a later melt.
 const LAPSE_RATE = 0.0065;
@@ -59,11 +59,11 @@ function settle(depth: number, temp: number, p: number, dt: number, day: number,
   return Math.max(0, d);
 }
 
-const FORECASTERS = [
+const forecasters = (seed: number) => [
   "Tante Ragnhild kjenner det i kneet",
   "Værhanen på låven peker",
   "Meteorologisk Tippekupong melder",
-  "Gubben på Sagstua sier",
+  `Gubben fra ${neighbourhood(seed)} sier`,
   "Elgen ser bekymret ut, så",
 ];
 
@@ -205,7 +205,7 @@ export class Weather {
   /** One line of folk wisdom about tomorrow. */
   saying(today: number): string {
     const [, tomorrow] = this.forecast(today, 2);
-    const who = FORECASTERS[today % FORECASTERS.length];
+    const who = forecasters(today)[today % forecasters(today).length];
     const what = {
       sol: "sol og blåvoks i morra",
       skyet: "grått, men greit",

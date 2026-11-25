@@ -1253,7 +1253,7 @@ async function main() {
 
   const publishEdition = () => {
     const groups = areas(map, tracks);
-    const place = [...groups.entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0] ?? "Hakadal";
+    const place = [...groups.entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0] ?? region.title;
     const elevations = [...tracks.each()].map(([x, y]) => map.elevationAt(x, y));
     const edition = writeEdition({
       day: clock.day,
@@ -2911,7 +2911,7 @@ async function main() {
           ? roadTraffic(traffic).describe
           : tracks.levelCrossing(x, y)
             ? `${RAIL_LEVEL_CROSSING.describe} Her er det lov å gå over — når bommen er oppe.`
-            : "Å gå over skinnene er ikke lov. Ikke engang i Hakadal.",
+            : `Å gå over skinnene er ikke lov. Ikke engang ${region.names.at}.`,
         options,
       },
       ground,

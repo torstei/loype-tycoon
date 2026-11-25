@@ -1,4 +1,4 @@
-import { region } from "./region";
+import { neighbourhood, region } from "./region";
 import { dayLabel, seasonName } from "./clock";
 import { MEMBERSHIP_FEE } from "./skiers";
 import { AccountRow } from "./savegame";
@@ -141,7 +141,7 @@ export function seasonEdition(s: SeasonSummary, number: number): Edition {
   const headline = may
     ? "Skiføre til mai – så var det over"
     : v === "great"
-      ? `Tidenes skivinter i Hakadal?`
+      ? `Tidenes skivinter ${region.names.at}?`
       : v === "fine"
         ? "Takk for vinteren!"
         : "En vinter å glemme";
@@ -153,12 +153,12 @@ export function seasonEdition(s: SeasonSummary, number: number): Edition {
     poor: "– Vi tar kritikken. Neste vinter skal sporet ligge der folk forventer det, sier løypelagets leder.",
   }[v];
   const skier = {
-    great: "– Jeg har gått mer på ski i år enn på ti år til sammen. Kona lurer på om jeg har flyttet ut, sier en fornøyd mosjonist fra Ekra.",
-    fine: "– Noen dager var helt fantastiske. Andre dager lurte jeg på om løypemaskina hadde gått seg vill, sier en mosjonist fra Sagstua.",
-    poor: "– Jeg har gått mer på isføre enn på snø i vinter. Brodder neste år, sier en skuffet skiløper fra Mork.",
+    great: `– Jeg har gått mer på ski i år enn på ti år til sammen. Kona lurer på om jeg har flyttet ut, sier en fornøyd mosjonist fra ${neighbourhood(seed)}.`,
+    fine: `– Noen dager var helt fantastiske. Andre dager lurte jeg på om løypemaskina hadde gått seg vill, sier en mosjonist fra ${neighbourhood(seed)}.`,
+    poor: `– Jeg har gått mer på isføre enn på snø i vinter. Brodder neste år, sier en skuffet skiløper fra ${neighbourhood(seed)}.`,
   }[v];
   const ending = may
-    ? `Sesongen varte helt til ${end}. – Har du ski i mai i Hakadal, har du vunnet i lotto, sier en lokal værkjenner.`
+    ? `Sesongen varte helt til ${end}. – Har du ski i mai ${region.names.at}, har du vunnet i lotto, sier en lokal værkjenner.`
     : short
       ? `Allerede ${end} var snøen borte. – Kort vinter. Det er sånn det blir framover, frykter en lokal værkjenner.`
       : `Siste skidag ble ${end}.`;
@@ -177,10 +177,10 @@ export function seasonEdition(s: SeasonSummary, number: number): Edition {
       </table>
     </article>`;
   const letters = [
-    { from: "Takknemlig, Hakadals verk", text: "Takk til alle som har kjørt løyper i vinter. Vi sees i desember. Ta med kaffe." },
-    { from: "Hundeeier, Mork", text: "Nå som snøen er borte, kan noen forklare meg hvor hunden min skal gå tur?" },
-    { from: "Utålmodig, Kirkeby", text: "Når kommer snøen igjen? Jeg har allerede smurt skiene til neste år." },
-    { from: "Pensjonist, Sagstua", text: "I min tid varte vinteren til midten av mai. Og vi gikk til skolen. På ski. I motbakke." },
+    { from: `Takknemlig, ${neighbourhood(seed + 1)}`, text: "Takk til alle som har kjørt løyper i vinter. Vi sees i desember. Ta med kaffe." },
+    { from: `Hundeeier, ${neighbourhood(seed + 2)}`, text: "Nå som snøen er borte, kan noen forklare meg hvor hunden min skal gå tur?" },
+    { from: `Utålmodig, ${neighbourhood(seed + 3)}`, text: "Når kommer snøen igjen? Jeg har allerede smurt skiene til neste år." },
+    { from: `Pensjonist, ${neighbourhood(seed + 4)}`, text: "I min tid varte vinteren til midten av mai. Og vi gikk til skolen. På ski. I motbakke." },
   ];
   const letter = pick(letters, seed);
   const html = `
@@ -201,7 +201,7 @@ export function seasonEdition(s: SeasonSummary, number: number): Edition {
       ${facts}
       ${s.goodHeadline ? `<article class="brief"><div class="kicker">Årets beste forside</div><h3>«${s.goodHeadline}»</h3></article>` : ""}
       ${s.badHeadline ? `<article class="brief"><div class="kicker">Årets ris</div><h3>«${s.badHeadline}»</h3></article>` : ""}
-      <article class="brief snow"><div class="kicker">Snømåling</div><p>Hakadal: <strong>0 cm</strong><br>Rotnes: <strong>hestehov</strong></p></article>
+      <article class="brief snow"><div class="kicker">Snømåling</div><p>${region.title}: <strong>0 cm</strong>${region.names.lowland ? `<br>${region.names.lowland.name}: <strong>hestehov</strong>` : ""}</p></article>
     </div>
     <article class="letter"><div class="kicker">Leserbrev</div><p>«${letter.text}»</p><p class="from">— ${letter.from}</p></article>
     <p class="next"><button data-open="album">Sesongen i bilder →</button></p>`;
@@ -309,7 +309,7 @@ export function summerHtml(s: SeasonSummary, summer: Summer, nextYear: number): 
   const notes = [pick(summerNotes(), seed), pick(summerNotes(), seed + 1)].filter((t, i, a) => a.indexOf(t) === i);
   const row = (label: string, value: number) => `<tr><td>${label}</td><td class="${value >= 0 ? "plus" : "minus"}">${value >= 0 ? "+" : "−"}${kr(Math.abs(value))}</td></tr>`;
   return `
-    <div class="head"><strong>☀️ Sommer i Hakadal</strong></div>
+    <div class="head"><strong>☀️ Sommer ${region.names.at}</strong></div>
     <p class="status">Snøen er borte, hestehoven er ute, og løypelaget har sommerpause. Nesten.</p>
     <ul>${notes.map((t) => `<li>${t}</li>`).join("")}</ul>
     <table class="books">

@@ -1,4 +1,4 @@
-import { capital, region } from "./region";
+import { capital, fill, neighbourhood, region } from "./region";
 import { dayLabel } from "./clock";
 
 
@@ -99,7 +99,7 @@ const TEXTS: Record<PostKind, Writer[]> = {
     (c) => `Gikk innover ${c.road} med ungene og akebrettet i dag. På vei tilbake var hele veien BRØYTET. Ned til grusen! Hvem bestemmer sånt?? 😡`,
     (c) => `Hvorfor i all verden brøyter noen ${c.road}? Den er jo perfekt å gå på ski på. Vi kjørte helt fra Bærum for dette.`,
     (c) => `Til deg som brøytet ${c.road} i dag: Vi hadde to unger og en pulk der inne. Takk for ingenting.`,
-    (c) => `Nydelig føre innover ${c.road}, men på vei hjem gikk vi på grus. Noen i Oslo kommune bør få beskjed om dette.`,
+    (c) => `Nydelig føre innover ${c.road}, men på vei hjem gikk vi på grus. Noen i kommunen bør få beskjed om dette.`,
   ],
   snapshot: [
     (c) => `Utsikt fra førerhytta ved ${c.place} 🚜`,
@@ -119,21 +119,21 @@ const TEXTS: Record<PostKind, Writer[]> = {
   ],
   offtopic: [
     () => "Noen som har funnet en blå vott ved parkeringen? Strikket av svigermor, så den MÅ finnes.",
-    () => "Har noen sett en grå katt på Ekra? Han heter Tiger og lyder ikke navnet.",
-    () => "Selges: Swix-voks, lite brukt. Hentes i Hakadal.",
-    () => "Til deg som tok den siste kanelbollen på 7-Eleven i Hakadal i dag: Du hadde skisko på. Jeg så deg.",
+    (c) => `Har noen sett en grå katt ved ${neighbourhood(c.day * 7 + c.hour)}? Han heter Tiger og lyder ikke navnet.`,
+    () => `Selges: Swix-voks, lite brukt. Hentes ${region.names.at}.`,
+    () => `Til deg som tok den siste kanelbollen på ${region.names.shop} i dag: Du hadde skisko på. Jeg så deg.`,
     () => "Skøytesporet eller klassisksporet for en nybegynner? Ikke kast stein.",
   ],
 };
 
 const COMMENTS: Record<PostKind, Writer[]> = {
-  groomed: [() => "Tusen takk! ❤️", () => "Dere er gull!", () => "Hva med Kirkebylia?", () => "Når kommer dere til Skansen?", () => "Takk for innsatsen 👏", () => "Har Vippset 200 kr!"],
+  groomed: [() => "Tusen takk! ❤️", () => "Dere er gull!", (c) => `Hva med ${neighbourhood(c.day * 3 + c.hour)}?`, (c) => `Når kommer dere til ${neighbourhood(c.day * 5 + c.hour + 1)}?`, () => "Takk for innsatsen 👏", () => "Har Vippset 200 kr!"],
   perfect: [() => "Misunnelig! 😍", () => "Var der i går, helt nydelig", () => "Hvilken smøring?", () => "Drar etter jobb!", () => "Klassisk eller skøyting?"],
   icy: [() => "Samme her. Jeg ga opp.", () => "Er det kjørt noe i dag?", () => "Takk for advarselen!", () => "Det var bedre før."],
   snowed: [(c) => `Den kommer i natt, sier ${c.driver}`, () => "Samme ved oss.", () => "Gå på truger, da 😄", () => "Tålmodighet!", () => "Det var bedre før."],
   moose: [() => "Wow! 😮", () => "Han var der i går også", () => "Husk å holde avstand!", () => "Heldiggris!"],
   julehus: [() => "Vi var der i går! Helt magisk ✨", () => "Han har visst flere lys i år", () => "Beste julestemningen i bygda 🎄"],
-  waffles: [() => "Beste vaflene i Nittedal", () => "Med brunost eller syltetøy?", () => "Rømme og syltetøy, selvsagt"],
+  waffles: [() => `Beste vaflene ${region.names.at}`, () => "Med brunost eller syltetøy?", () => "Rømme og syltetøy, selvsagt"],
   chairlift: [() => "Endelig!", () => "Må prøves!", () => "Hvor mye koster det?"],
   ploughed: [
     () => "Det er en skogsbilvei. Den er der for tømmerbilene.",
@@ -196,7 +196,8 @@ export function writePost(kind: PostKind, c: PostContext, photo: string | null, 
       comments.push({ author: personName(seed + 29 + i * 17), text });
     }
   }
-  return { day: c.day, hour: c.hour, kind, author, driver, text: pick(TEXTS[kind], seed + 1)(c), photo, likes, comments, tone: TONE[kind] };
+  const local: Writer[] = kind === "offtopic" ? region.texts.groupPosts.map((t) => () => fill(t, seed + 2)) : [];
+  return { day: c.day, hour: c.hour, kind, author, driver, text: pick([...TEXTS[kind], ...local], seed + 1)(c), photo, likes, comments, tone: TONE[kind] };
 }
 
 const escape = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");

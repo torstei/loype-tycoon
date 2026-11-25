@@ -350,10 +350,21 @@ new map and never overwrites one that exists. Every field is optional:
     "railway": "Gjøvikbanen",
     "trainEnds": ["Gjøvik", "Oslo S"],
     "skiArea": "Varingskollen",
-    "waffleClub": "Nittedal Skytterlag"
+    "waffleClub": "Nittedal Skytterlag",
+    "at": "i Hakadal",
+    "locals": "hakadølene",
+    "neighbourhoods": ["Hakadals verk", "Ekra", "Skansen", "Sagstua", "Mork"],
+    "lowland": { "name": "Rotnes", "heading": "Sør i bygda", "places": ["Rotnes", "Hagan", "Slattum"] },
+    "mainRoad": "Rv. 4",
+    "shop": "7-Eleven i Hakadal"
   },
   "climate": { "valley": 200, "high": 500 },
   "christmasHouse": { "lat": 60.097103, "lon": 10.867278, "street": "Hadelandsveien" },
+  "texts": {
+    "groupPosts": ["Hvem eier den blå Volvoen som står på tvers på P Hakadal?"],
+    "letters": [{ "from": "Pensjonist, {sted}", "text": "Før i tida tråkket vi sporene selv." }],
+    "lowlandNews": ["Slattum melder om tre centimeter snø. To av dem var på en bil fra {title}."]
+  },
   "places": {
     "rename": { "Name on the map": "Better name" },
     "hide": ["A place that should not show"],
@@ -367,9 +378,18 @@ new map and never overwrites one that exists. Every field is optional:
   web map. Without `start` the game starts at the station named like the title, else the station,
   parking or named place nearest the middle of the map.
 - `names` go into the texts: the paper, the group in the feed, the railway, the ski area with its
-  chairlift and the shooting club that runs the waffle stand. Left out, they are made from the title
-  ("Preppestatus Lillehammer", "Lillehammer Skytterlag"), with "Lokalavisa", "jernbanen" and
-  "alpinbakken". Use invented names for organisations, as Hakadal does.
+  chairlift and the shooting club that runs the waffle stand. `at` is how "in" the place is said
+  ("i Hakadal", "på Lillehammer"), `locals` its people, `neighbourhoods` where the people quoted and
+  the letter writers live, `mainRoad` the big road the track crosses, and `shop` where skiers buy
+  buns. Left out, they are made from the title and the map: "Preppestatus Lillehammer", "Lillehammer
+  Skytterlag", "i Lillehammer", "Lokalavisa", "jernbanen", "alpinbakken", "butikken", the named places
+  nearest the start, and the busiest named road. Use invented names for organisations, as Hakadal does.
+- `lowland` is a neighbour further down, where the snow never lies as long, for the paper to tease:
+  it gets a column under `heading` and a line in the snow measurement, and its people come up to ski.
+  Without it there is no such column.
+- `texts` are local jokes added to the game's own: off-topic posts in the group, readers' letters and
+  the lowland column. They may use `{title}`, `{at}`, `{locals}`, `{sted}` (one of the
+  neighbourhoods), `{lavland}`, `{vei}` (the main road) and `{avis}` (the paper).
 - `climate` is the valley floor the weather is for, and a height where the snow lies longer, in
   metres. Without it the valley is the height of the start point, and the high snow 300 m above.
 - Without `christmasHouse` there is no Christmas house, and no stories about it.

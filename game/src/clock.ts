@@ -2,7 +2,7 @@
 const SECONDS_PER_HOUR = 12;
 
 export const SPEEDS = [1, 2, 4, 8, 16];
-/** 1 December to 31 May: no winter in Hakadal lasts longer, even up at Varingskollen. */
+/** 1 December to 31 May: no winter in the lowlands of Norway lasts longer. */
 export const MAX_SEASON_DAYS = 182;
 /** Before 1 March a thaw is only a thaw; after it, snow gone from the tracks ends the season. */
 export const EARLIEST_SEASON_END = 90;
