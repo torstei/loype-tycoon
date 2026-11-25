@@ -20,6 +20,18 @@ export type Schedule = "night" | "always";
 
 type State = "home" | "grooming" | "returning";
 
+/** The player at the controls: drive or stand, which way at the next junction, and a U-turn. */
+export interface Steering {
+  go: boolean;
+  turn: -1 | 0 | 1;
+  turnAround: boolean;
+}
+
+/** Wider than this between the ways on, in radians, and the tile is a junction where the player's choice counts. */
+const JUNCTION_SPREAD = 1;
+/** Ways bending back further than this are not ways on. */
+const MAX_BEND = 2.2;
+
 export interface Ledger {
   spend(amount: number): boolean;
   /** Something happened out there that people will talk about. */
@@ -181,6 +193,10 @@ export class Groomer {
   onCall = false;
   /** Sent out by hand: works the whole shift, whatever the time of day. */
   private ordered = false;
+  /** Set while the player drives; the machine then goes where it is steered and grooms what it passes. */
+  steering: Steering | null = null;
+  /** The last tiles reached, newest last, so a driven machine knows where it came from. */
+  private trail: [number, number][] = [];
 
   constructor(
     readonly name: string,
@@ -234,20 +250,20 @@ export class Groomer {
           this.py = cy;
           budget -= dist;
           this.path.shift();
+          const from = this.trail.at(-1);
+          this.trail = [...this.trail.slice(-3), [tx, ty]];
           const atGrade = tracks.has(tx, ty) && tracks.crossing[tracks.index(tx, ty)] === Crossing.AtGrade;
           if (atGrade && !this.onRoad) {
             this.crossRoad(tx, ty, tracks, ledger);
           }
           this.onRoad = atGrade;
-          if (this.state === "grooming" && tracks.has(tx, ty) && tracks.needsGrooming(tx, ty, weather, now)) {
-            if (!ledger.spend(COST_PER_TILE)) {
-              this.status = "Tom for dieselpenger, kjører hjem";
-              this.headHome(tracks);
-              continue;
-            }
-            tracks.groom(tx, ty, weather, now);
-            this.groomedTonight++;
-            this.totalGroomed++;
+          // On a diagonal step the blade also covers the track in the corner between the two tiles.
+          const covered: [number, number][] = this.steering && from && from[0] !== tx && from[1] !== ty ? [[tx, from[1]], [from[0], ty], [tx, ty]] : [[tx, ty]];
+          if (this.state === "grooming" && !covered.every(([x, y]) => this.groomTile(x, y, tracks, weather, now, ledger))) {
+            this.status = "Tom for dieselpenger, kjører hjem";
+            this.steering = null;
+            this.headHome(tracks);
+            continue;
           }
         } else {
           this.px += ((cx - this.px) / dist) * budget;
@@ -262,6 +278,18 @@ export class Groomer {
         this.park();
         return;
       }
+      if (this.steering) {
+        if (!this.steering.go) {
+          this.status = this.status === "Enden av løypa, snu" ? this.status : "Står stille";
+          return;
+        }
+        const next = this.nextDriven(tracks);
+        if (!next) {
+          return;
+        }
+        this.path = [next];
+        continue;
+      }
       const outOfTime = this.shift >= MAX_SHIFT_HOURS || (!this.ordered && !inWindow(schedule, hourOfDay));
       const next = outOfTime ? null : this.findWork(tracks, weather, now);
       if (next) {
@@ -272,6 +300,86 @@ export class Groomer {
         this.headHome(tracks);
       }
     }
+  }
+
+  /** False when the diesel money has run out. */
+  private groomTile(x: number, y: number, tracks: TrackNetwork, weather: Weather, now: number, ledger: Ledger): boolean {
+    if (!tracks.has(x, y) || !tracks.needsGrooming(x, y, weather, now)) {
+      return true;
+    }
+    if (!ledger.spend(COST_PER_TILE)) {
+      return false;
+    }
+    tracks.groom(x, y, weather, now);
+    this.groomedTonight++;
+    this.totalGroomed++;
+    return true;
+  }
+
+  /** Where the player's steering takes the machine from this tile: on along the track, the chosen way at a junction, or back. */
+  private nextDriven(tracks: TrackNetwork): [number, number] | null {
+    const steer = this.steering!;
+    const here = this.tile;
+    const from = this.trail.length > 1 ? this.trail.at(-2)! : null;
+    const same = (a: [number, number], b: [number, number]) => a[0] === b[0] && a[1] === b[1];
+    if (steer.turnAround) {
+      steer.turnAround = false;
+      this.heading += Math.PI;
+      this.trail = [here];
+      return from && tracks.has(...from) ? from : this.nextDriven(tracks);
+    }
+    const bend = ([x, y]: [number, number]) => {
+      const d = Math.atan2(y + 0.5 - this.py, x + 0.5 - this.px) - this.heading;
+      return Math.atan2(Math.sin(d), Math.cos(d));
+    };
+    const recent = (t: [number, number]) => this.trail.some((r) => same(r, t));
+    const all = tracks.neighbours(...here).filter((n) => !recent(n) && Math.abs(bend(n)) < MAX_BEND);
+    // Skip the tiles that only sit beside the one just left: they are the same track, not a way on.
+    const ways = all.filter((n) => !from || Math.max(Math.abs(n[0] - from[0]), Math.abs(n[1] - from[1])) > 1);
+    const options = ways.length ? ways : all;
+    if (!options.length) {
+      steer.go = false;
+      this.status = "Enden av løypa, snu";
+      return null;
+    }
+    const bends = options.map(bend);
+    const junction = Math.max(...bends) - Math.min(...bends) > JUNCTION_SPREAD;
+    const turn = junction ? steer.turn : 0;
+    if (junction) {
+      steer.turn = 0;
+    }
+    const score = (b: number) => (turn === 0 ? Math.abs(b) : -turn * b);
+    let best = 0;
+    bends.forEach((b, i) => {
+      if (score(b) < score(bends[best])) {
+        best = i;
+      }
+    });
+    this.status = "Du kjører";
+    return options[best];
+  }
+
+  /** Take the controls, sending the machine out first if it is at home; null when it can go, or why it cannot. */
+  takeControls(tracks: TrackNetwork): string | null {
+    if (this.state === "home") {
+      const entry = this.garage.entry(tracks);
+      if (!entry) {
+        return "Garasjen er ikke koblet til løypenettet.";
+      }
+      this.ordered = true;
+      this.leave(entry);
+    }
+    this.state = "grooming";
+    this.path = this.path.slice(0, 1);
+    this.trail = [this.tile];
+    this.steering = { go: true, turn: 0, turnAround: false };
+    this.status = "Du kjører";
+    return null;
+  }
+
+  /** Hand the machine back to its driver, who carries on grooming what needs it. */
+  releaseControls() {
+    this.steering = null;
   }
 
   private crossRoad(x: number, y: number, tracks: TrackNetwork, ledger: Ledger) {
@@ -410,6 +518,7 @@ export class Groomer {
 
   private park() {
     this.state = "home";
+    this.steering = null;
     this.ordered = false;
     this.sprite.root.visible = false;
     this.px = this.garage.x + 0.6;

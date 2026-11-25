@@ -204,6 +204,13 @@ first, from the train to real time, when it runs at about 80 km/h and stops at t
 "Sanntid", 10× or 3× sanntid, or back to the game's own speed ("Spillfart"). Picking a speed or closing the view
 ends the slow motion. Knips takes a picture from it without stopping the game.
 
+"🕹 Kjør selv" (on the snowcat's card, in its live view, or 🕹 under Løypemaskiner, which also
+sends it out of the garage) hands the player the controls. The machine follows the track: ↑
+drives, ↓ stops and, when standing, turns it round, and ← → pick the way at the next junction;
+the buttons under the view do the same. It grooms what it passes that needs grooming,
+the corner tiles of a diagonal step included, and stops at the end of a track. Switching it off
+or closing the view hands the machine back to its driver.
+
 Click a skier, a snowcat out on the track or the train for a card about it, and the game pauses
 until the card is closed, so the subject stays put: a skier's name, age,
 kind of skier, where they came from, how far into the trip they are, their mood and a couple of
