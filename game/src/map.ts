@@ -137,8 +137,8 @@ export class GameMap {
 
   static async load(name: string): Promise<GameMap> {
     const res = await fetch(`${import.meta.env.BASE_URL}maps/${name}.json`);
-    if (!res.ok) {
-      throw new Error(`map ${name}: HTTP ${res.status}`);
+    if (!res.ok || !res.headers.get("content-type")?.includes("json")) {
+      throw new Error(`Fant ikke kartet «${name}».`);
     }
     return new GameMap(await res.json());
   }

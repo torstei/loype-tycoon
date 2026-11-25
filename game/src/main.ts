@@ -16,6 +16,7 @@ import {
   download,
   encodeTracks,
   readSlot,
+  useSaveSpace,
   SAVE_FORMAT,
   SAVE_VERSION,
   SaveGame,
@@ -29,7 +30,7 @@ import {
 import { Skijorer } from "./skijor";
 import { around, Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, reachFrom, Skier, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
 import { TrackCrew } from "./crew";
-import { GameMap } from "./map";
+import { GameMap, Poi } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
 import { hash, landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
@@ -159,6 +160,30 @@ const FAST_FORWARD_STEP = 0.1;
 const CONNECT_REACH = 3;
 const kr = (n: number) => `${n.toLocaleString("nb-NO")} kr`;
 
+const DEFAULT_MAP = "hakadal";
+
+/** The map named in the address (?map=name), or the default one. */
+function chosenMap(): string {
+  const asked = new URLSearchParams(location.search).get("map");
+  return asked && /^[a-z0-9-]+$/.test(asked) ? asked : DEFAULT_MAP;
+}
+
+/**
+ * Where the game starts: the station named after the map, else the station, parking or named place
+ * nearest the middle of the map, else the middle itself.
+ */
+function startPoint(map: GameMap): Poi {
+  const [mx, my] = [map.width / 2, map.height / 2];
+  const nearest = (kind: Poi["kind"]) =>
+    map.pois.filter((p) => p.kind === kind && (kind !== "place" || p.name)).sort((a, b) => Math.hypot(a.x - mx, a.y - my) - Math.hypot(b.x - mx, b.y - my))[0];
+  return (
+    map.pois.find((p) => p.kind === "station" && p.name === map.title) ??
+    nearest("station") ??
+    nearest("parking") ??
+    nearest("place") ?? { kind: "place", name: null, x: Math.floor(mx), y: Math.floor(my) }
+  );
+}
+
 async function main() {
   const updateCompact = () => document.documentElement.classList.toggle("compact", touchOnly() || innerWidth < COMPACT_BELOW);
   document.documentElement.classList.toggle("touch", touchOnly());
@@ -166,7 +191,8 @@ async function main() {
   const restingTool = (): Tool => (touchOnly() ? "build" : "look");
   updateCompact();
   window.addEventListener("resize", updateCompact);
-  const map = await GameMap.load("hakadal");
+  const map = await GameMap.load(chosenMap());
+  useSaveSpace(map.name);
   // Pick up where we left off: an explicit load or new game, otherwise the autosave.
   const boot = takeBoot();
   const saved = boot?.kind === "new" ? null : boot?.kind === "file" ? boot.save : readSlot(boot?.kind === "slot" ? boot.slot : "auto");
@@ -232,7 +258,7 @@ async function main() {
   world.addChild(cursor);
   const whimsy = new Whimsy(map);
   world.addChild(whimsy.layer);
-  const startPoi = map.pois.find((p) => p.kind === "station" && p.name === "Hakadal") ?? map.pois[0];
+  const startPoi = startPoint(map);
   const crew = new TrackCrew(startPoi.x, startPoi.y);
   world.addChild(crew.layer);
   const labels = new Container();
@@ -246,6 +272,7 @@ async function main() {
   const lightsWorld = new Container();
   const townLights = nightLights(map);
   const julehus = new Julehus();
+  julehus.lights.visible = map.name === JULEHUS.map;
   lightsWorld.addChild(townLights, julehus.lights, alpine.lights, crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
   const precipitation = new Precipitation();
   app.stage.addChild(night, lightsWorld, precipitation.layer);
@@ -1520,7 +1547,7 @@ async function main() {
       post("moose", [Math.floor(mx), Math.floor(my)], {}, viewAlongTrack(mx, my, { kind: "moose", x: mx, y: my }));
       return;
     }
-    if (clock.day >= 7 && clock.day <= LIGHTS_DOWN_DAY && h >= 17 && h < 22 && since("julehus") > 24 * 10 && chance(0.15)) {
+    if (julehus.lights.visible && clock.day >= 7 && clock.day <= LIGHTS_DOWN_DAY && h >= 17 && h < 22 && since("julehus") > 24 * 10 && chance(0.15)) {
       post("julehus", [JULEHUS.x, JULEHUS.y], {}, { camera: [JULEHUS.x + 1.5, JULEHUS.y + 2.1], target: [JULEHUS.x + 0.5, JULEHUS.y + 0.5], festive: [JULEHUS.x, JULEHUS.y] });
       return;
     }
@@ -3468,7 +3495,7 @@ async function main() {
         openLift(lift.name);
         return;
       }
-      if (julehus.near(lx, ly)) {
+      if (julehus.lights.visible && julehus.near(lx, ly)) {
         showToast(clock.day <= LIGHTS_DOWN_DAY
           ? "🎄 <strong>Julehuset i Hadelandsveien</strong> – et lokalt landemerke. Tusenvis av lys, reinsdyr på plenen, og fast plass i Varingen hver desember. Best etter mørkets frembrudd."
           : "🎄 <strong>Julehuset i Hadelandsveien</strong> – lysene ble tatt ned på tjugendedag. Kom tilbake i desember.");

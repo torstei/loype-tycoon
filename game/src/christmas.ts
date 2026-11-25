@@ -2,7 +2,7 @@ import { Graphics } from "pixi.js";
 import { hash, PX } from "./render";
 
 /** The house in Hadelandsveien that ends up in Varingen every December for its Christmas lights. */
-export const JULEHUS = { x: 294, y: 239, name: "julehuset i Hadelandsveien" };
+export const JULEHUS = { map: "hakadal", x: 294, y: 239, name: "julehuset i Hadelandsveien" };
 
 /** Tjugendedag, 13 January, when Christmas is over and the lights come down. */
 export const LIGHTS_DOWN_DAY = 43;

@@ -1,6 +1,10 @@
 """Generate a Løype Tycoon tile map from OpenStreetMap and Kartverket elevation data.
 
     python tools/mapgen/mapgen.py hakadal
+    python tools/mapgen/mapgen.py --center 61.115,10.466 --size 8 --name lillehammer --title Lillehammer
+
+The first form makes one of the regions listed in REGIONS; the second any square in Norway, by its
+centre (latitude, longitude) and width in kilometres. The game plays a map at ?map=<name>.
 
 Downloads are cached under tools/mapgen/cache/, so re-running only re-rasterises.
 """
@@ -9,6 +13,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -82,6 +87,17 @@ class Region:
 REGIONS = {
     "hakadal": Region("hakadal", "Hakadal", col=10516, row=266616, cols=400, rows=400),
 }
+
+MAP_NAME = re.compile(r"^[a-z0-9-]+$")
+MIN_SIZE_KM, MAX_SIZE_KM = 2, 15
+
+
+def region_around(name, title, lat, lon, size_km):
+    """A square region centred on a point, snapped to the global grid."""
+    x, y = Transformer.from_crs("EPSG:4326", CRS, always_xy=True).transform(lon, lat)
+    tiles = round(size_km * 1000 / GRID_M)
+    return Region(name, title, col=math.floor(x / GRID_M) - tiles // 2, row=math.floor(y / GRID_M) - tiles // 2,
+                  cols=tiles, rows=tiles)
 
 # Terrain ids are shared with the game (game/src/terrain.ts); keep the two in sync.
 FOREST, OPEN, FARMLAND, BOG, WATER, BUILT, ROCK = 0, 1, 2, 3, 4, 5, 6
@@ -606,11 +622,30 @@ def content_hash(*arrays):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("region", choices=sorted(REGIONS))
+    ap.add_argument("region", nargs="?", choices=sorted(REGIONS))
+    ap.add_argument("--center", metavar="LAT,LON", help="centre of a new map, in degrees")
+    ap.add_argument("--size", type=float, default=8, help=f"width of a new map in km ({MIN_SIZE_KM}-{MAX_SIZE_KM}, default 8)")
+    ap.add_argument("--name", help="file name and ?map= value of a new map: lower case letters, digits and -")
+    ap.add_argument("--title", help="the map's name in the game (default: the name, capitalised)")
     ap.add_argument("--out", type=Path, default=ROOT / "game" / "public" / "maps")
     args = ap.parse_args()
 
-    region = REGIONS[args.region]
+    if args.center:
+        if args.region:
+            ap.error("give either a region or --center, not both")
+        if not args.name or not MAP_NAME.match(args.name):
+            ap.error("--center needs --name, in lower case letters, digits and -")
+        if not MIN_SIZE_KM <= args.size <= MAX_SIZE_KM:
+            ap.error(f"--size must be between {MIN_SIZE_KM} and {MAX_SIZE_KM} km")
+        try:
+            lat, lon = (float(v) for v in args.center.split(","))
+        except ValueError:
+            ap.error("--center is latitude,longitude, such as 60.0,10.8")
+        region = region_around(args.name, args.title or args.name.capitalize(), lat, lon, args.size)
+    elif args.region:
+        region = REGIONS[args.region]
+    else:
+        ap.error("give a region or --center")
     CACHE.mkdir(exist_ok=True)
     args.out.mkdir(parents=True, exist_ok=True)
 
