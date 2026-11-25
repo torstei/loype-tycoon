@@ -217,8 +217,24 @@ export class SkierSprite {
   }
 }
 
-class Skier {
+/** What a skier can tell about themselves when the player clicks on them. */
+export interface SkierProfile {
+  seed: number;
+  kind: string;
+  from: string;
+  /** Tiles skied so far, and how far they meant to go. */
+  travelled: number;
+  goal: number;
+  /** How the trip has been so far, 0 … 1; null before the first tile. */
+  mood: number | null;
+  cabin: boolean;
+}
+
+export class Skier {
   readonly sprite: SkierSprite;
+  /** Fixes the made-up details shown about this skier. */
+  readonly seed = Math.floor(Math.random() * 1_000_000);
+  readonly jacket: number;
   px: number;
   py: number;
   private target: [number, number];
@@ -251,7 +267,8 @@ class Skier {
     readonly trailhead: Trailhead,
     private readonly goal: number,
   ) {
-    this.sprite = new SkierSprite(pick(kind.jacket), pick([0xc8342b, 0x2f5fb0, 0xf2c12e, 0xffffff, 0x3aa35a]), kind.scale);
+    this.jacket = pick(kind.jacket);
+    this.sprite = new SkierSprite(this.jacket, pick([0xc8342b, 0x2f5fb0, 0xf2c12e, 0xffffff, 0x3aa35a]), kind.scale);
     this.px = start[0] + 0.5;
     this.py = start[1] + 0.5;
     this.target = start;
@@ -259,6 +276,18 @@ class Skier {
 
   get tile(): [number, number] {
     return [Math.floor(this.px), Math.floor(this.py)];
+  }
+
+  profile(): SkierProfile {
+    return {
+      seed: this.seed,
+      kind: this.kind.name,
+      from: this.trailhead.name,
+      travelled: this.travelled,
+      goal: this.goal,
+      mood: this.travelled ? (this.qualitySum / this.travelled) * this.roadMood : null,
+      cabin: this.visitedCabin,
+    };
   }
 
   update(hours: number, map: GameMap, tracks: TrackNetwork, weather: Weather, say: (s: Skier, text: string) => void, cabins: [number, number][] = []) {

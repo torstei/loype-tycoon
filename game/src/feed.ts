@@ -3,7 +3,7 @@ import { dayLabel } from "./clock";
 /** The local group where skiers and the snowcat driver post about the tracks. */
 export const GROUP_NAME = "Preppestatus Hakadal og omegn";
 
-export type PostKind = "groomed" | "perfect" | "icy" | "snowed" | "moose" | "julehus" | "waffles" | "chairlift" | "ploughed" | "offtopic";
+export type PostKind = "groomed" | "perfect" | "icy" | "snowed" | "moose" | "julehus" | "waffles" | "chairlift" | "ploughed" | "snapshot" | "offtopic";
 
 export interface Comment {
   author: string;
@@ -37,6 +37,8 @@ export interface PostContext {
   waffles?: number;
   /** A road the post is about. */
   road?: string;
+  /** Who or what is in the photo, for the club's own photo posts. */
+  subject?: string;
 }
 
 const FIRST = ["Kristin", "Ole Martin", "Hilde", "Thomas", "Anne Grethe", "Jørn", "Siri", "Espen", "Marit", "Lars Erik", "Tonje", "Rune", "Ida", "Bente", "Øyvind", "Camilla", "Petter", "Gro"];
@@ -47,7 +49,7 @@ function rand(seed: number): number {
   return s - Math.floor(s);
 }
 const pick = <T>(xs: T[], seed: number): T => xs[Math.floor(rand(seed) * xs.length)];
-const name = (seed: number) => `${pick(FIRST, seed)} ${pick(LAST, seed + 7)}`;
+export const personName = (seed: number) => `${pick(FIRST, seed)} ${pick(LAST, seed + 7)}`;
 const temp = (t: number) => `${Math.round(t)}`.replace("-", "−");
 
 type Writer = (c: PostContext) => string;
@@ -98,6 +100,12 @@ const TEXTS: Record<PostKind, Writer[]> = {
     (c) => `Til deg som brøytet ${c.road} i dag: Vi hadde to unger og en pulk der inne. Takk for ingenting.`,
     (c) => `Nydelig føre innover ${c.road}, men på vei hjem gikk vi på grus. Noen i Oslo kommune bør få beskjed om dette.`,
   ],
+  snapshot: [
+    (c) => `Dagens bilde fra løypa ved ${c.place} 📸`,
+    (c) => `Fanget ${c.subject ?? "løypa"} ved ${c.place} i dag!`,
+    (c) => `Sånn ser det ut ved ${c.place} akkurat nå. Velkommen ut! ⛷`,
+    (c) => `${temp(c.temperature)} grader ved ${c.place}. Bildet sier resten.`,
+  ],
   offtopic: [
     () => "Noen som har funnet en blå vott ved parkeringen? Strikket av svigermor, så den MÅ finnes.",
     () => "Har noen sett en grå katt på Ekra? Han heter Tiger og lyder ikke navnet.",
@@ -124,6 +132,7 @@ const COMMENTS: Record<PostKind, Writer[]> = {
     () => "Tømmerbilen bryr seg lite om akebrett.",
     () => "Løypelaget har fine spor rett ved siden av!",
   ],
+  snapshot: [() => "Nydelig! 😍", () => "Er det meg?? 😄", () => "Hvor er dette?", () => "Blir med i morgen!", () => "Så fint!", () => "Dere er gull!"],
   offtopic: [() => "Feil gruppe 😅", () => "Har du sjekket under bilen?", () => "Delt!", () => "Håper det ordner seg"],
 };
 
@@ -137,6 +146,7 @@ const LIKES: Record<PostKind, [number, number]> = {
   waffles: [20, 60],
   chairlift: [30, 90],
   ploughed: [20, 70],
+  snapshot: [30, 100],
   offtopic: [1, 8],
 };
 
@@ -150,12 +160,13 @@ const TONE: Record<PostKind, -1 | 0 | 1> = {
   waffles: 1,
   chairlift: 1,
   ploughed: 0,
+  snapshot: 0,
   offtopic: 0,
 };
 
 export function writePost(kind: PostKind, c: PostContext, photo: string | null, seed: number): Post {
-  const driver = kind === "groomed";
-  const author = driver ? `${c.driver} · løypelaget` : name(seed);
+  const driver = kind === "groomed" || kind === "snapshot";
+  const author = driver ? `${c.driver} · løypelaget` : personName(seed);
   const [lo, hi] = LIKES[kind];
   const mood = TONE[kind] < 0 ? 1.2 - c.reputation * 0.5 : 0.5 + c.reputation;
   const likes = Math.round((lo + rand(seed + 3) * (hi - lo)) * mood);
@@ -165,7 +176,7 @@ export function writePost(kind: PostKind, c: PostContext, photo: string | null, 
   for (let i = 0; i < count; i++) {
     const text = pick(pool, seed + 11 + i * 13)(c);
     if (!comments.some((x) => x.text === text)) {
-      comments.push({ author: name(seed + 29 + i * 17), text });
+      comments.push({ author: personName(seed + 29 + i * 17), text });
     }
   }
   return { day: c.day, hour: c.hour, kind, author, driver, text: pick(TEXTS[kind], seed + 1)(c), photo, likes, comments, tone: TONE[kind] };

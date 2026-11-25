@@ -80,9 +80,11 @@ export class GameClock {
   hours = 20;
   speedIndex = 0;
   paused = false;
+  /** Game hours per real hour while something slows the game below 1× (the live view); null otherwise. */
+  slowMotion: number | null = null;
 
   get speed(): number {
-    return SPEEDS[this.speedIndex];
+    return this.slowMotion !== null ? (this.slowMotion * SECONDS_PER_HOUR) / 3600 : SPEEDS[this.speedIndex];
   }
 
   get day(): number {
