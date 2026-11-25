@@ -16,11 +16,20 @@ export interface GroundShot {
   snowing: boolean;
   /** How the track looks where it is: grooves crisp, worn, icy or snowed in. */
   condition: (x: number, y: number) => Condition;
-  subject?: { kind: "skier" | "snowcat" | "moose"; x: number; y: number; colour?: number };
+  /** A train is placed by its middle carriage; cars gives each carriage's middle and heading, the leading one first and facing the way it goes. */
+  subject?: { kind: "skier" | "snowcat" | "moose" | "train"; x: number; y: number; colour?: number; cars?: [number, number, number][] };
+  /** Camera height above the ground in metres: a skier's eyes unless a driver's seat says otherwise. */
+  eye?: number;
+  /** Seen from a driver's seat: the frame, wiper and dashboard of the cab round the picture. */
+  cab?: { kind: "train" | "snowcat"; window: "front" | "left" | "right" };
   /** Coloured Christmas lights on a house tile. */
   festive?: [number, number];
   /** A photo taken to show off the weather: facing the sun, with rays and a lens flare. */
   brag?: boolean;
+  /** Telephoto: 2 shows things twice the size, in a narrower view. */
+  zoom?: number;
+  /** Look up (positive) or down from the automatic framing, in radians. */
+  tilt?: number;
   /** Street lamps in tile units, for night shots. */
   lamps: [number, number][];
   seed: number;
@@ -35,12 +44,17 @@ export function sunDirection(hour: number): [number, number] {
 const W = 480;
 const H = 300;
 const FOV = (64 * Math.PI) / 180;
-const FOCAL = W / 2 / Math.tan(FOV / 2);
-const HORIZON = H * 0.44;
+const BASE_FOCAL = W / 2 / Math.tan(FOV / 2);
+const BASE_HORIZON = H * 0.44;
+/** Where in the frame a subject's middle goes, from the top. */
+const SUBJECT_LINE = H * 0.62;
 const EYE = 1.7;
 const TILE = 25;
 const MAX_DIST = 5000;
 const TREE_RANGE = 420;
+/** Metres kept clear of trees round the camera, and either side of the line to the subject. */
+const CLEAR_AROUND_CAMERA = 10;
+const CLEAR_SIGHTLINE = 7;
 const HOUSE_RANGE = 900;
 const NEAR = 0.4;
 
@@ -63,6 +77,7 @@ interface Segment {
 
 /** Render a ground-level snapshot of the game world; a small software renderer with a depth buffer. */
 export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
+  const FOCAL = BASE_FOCAL * (shot.zoom ?? 1);
   const { map } = shot;
   const cx = shot.camera[0] * TILE;
   const cy = shot.camera[1] * TILE;
@@ -103,7 +118,13 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
     const gy = ((e01 - e00) * (1 - u) + (e11 - e10) * u) / TILE;
     return [h, gx, gy];
   };
-  const eye = elevAt(cx, cy) + EYE;
+  const eye = elevAt(cx, cy) + (shot.eye ?? EYE);
+  // Tilt towards the subject, so it stays in frame from above or below, and zoomed in.
+  const subjectDist = shot.subject ? Math.hypot(shot.subject.x * TILE - cx, shot.subject.y * TILE - cy) : 0;
+  const framed = shot.subject && subjectDist > 1
+    ? SUBJECT_LINE + ((elevAt(shot.subject.x * TILE, shot.subject.y * TILE) + 1 - eye) / subjectDist) * FOCAL
+    : BASE_HORIZON;
+  const HORIZON = Math.max(-H * 1.5, Math.min(H * 2.5, framed + Math.tan(shot.tilt ?? 0) * FOCAL));
 
   // Light: a low winter sun from the south at midday, a blue night, warm at dusk.
   const dl = clamp01(shot.daylight);
@@ -480,6 +501,20 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
     const l = lineAt(mx, my);
     return (!!l && Math.abs(l.across) < HALF_WIDTH[l.s.kind] + 2.5) || cleared(mx, my);
   };
+  // Whoever takes the picture steps out from behind the nearest spruce and sees the subject.
+  const sightTo = shot.subject ? [shot.subject.x * TILE, shot.subject.y * TILE] : null;
+  const inTheWay = (mx: number, my: number) => {
+    if (Math.hypot(mx - cx, my - cy) < CLEAR_AROUND_CAMERA) {
+      return true;
+    }
+    if (!sightTo) {
+      return false;
+    }
+    const [sx, sy] = sightTo;
+    const len2 = (sx - cx) ** 2 + (sy - cy) ** 2 || 1;
+    const t = Math.max(0, Math.min(1, ((mx - cx) * (sx - cx) + (my - cy) * (sy - cy)) / len2));
+    return Math.hypot(mx - (cx + (sx - cx) * t), my - (cy + (sy - cy) * t)) < CLEAR_SIGHTLINE;
+  };
   const trees: { x: number; y: number; h: number; seed: number; d: number }[] = [];
   const treeReach = Math.ceil(TREE_RANGE / TILE);
   for (let ty = cty0 - treeReach; ty <= cty0 + treeReach; ty++) {
@@ -492,7 +527,7 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
       for (let k = 0; k < count; k++) {
         const mx = (tx + hash(tx, ty, 20 + k)) * TILE;
         const my = (ty + hash(tx, ty, 40 + k)) * TILE;
-        if (!inView(mx, my, TREE_RANGE) || blocked(mx, my)) {
+        if (!inView(mx, my, TREE_RANGE) || blocked(mx, my) || inTheWay(mx, my)) {
           continue;
         }
         trees.push({ x: mx, y: my, h: (terrain === Terrain.Bog ? 5 : 11) + hash(tx, ty, 60 + k) * 11, seed: tx * 31 + ty * 17 + k, d: toCam(mx, my, 0).z });
@@ -657,6 +692,39 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
           glows.push({ mx, my, mz: ground + 3.05, colour: [255, 150, 40], size: 0.18 });
           glows.push({ mx: mx + fx * 9, my: my + fy * 9, mz: ground + 0.3, colour: [255, 240, 200], size: 1.6 });
         }
+      } else if (subject.kind === "train") {
+        const body = tone([176, 36, 42]);
+        const glass: RGB = night > 0.3 ? [255, 214, 130] : tone([46, 56, 74]);
+        (subject.cars ?? [[subject.x, subject.y, 0]]).forEach(([tx, ty, angle], i) => {
+          const [carX, carY] = [tx * TILE, ty * TILE];
+          const base = elevAt(carX, carY) + 0.4;
+          const [ux, uy] = [Math.cos(angle), Math.sin(angle)];
+          const [vx, vy] = [-uy, ux];
+          const [hl, hw, floor, top] = [14.5, 1.6, 0.9, 4.1];
+          const at = (a: number, b: number, z: number) => toCam(carX + ux * a + vx * b, carY + uy * a + vy * b, base + z);
+          for (const s of [-1, 1]) {
+            quad(at(-hl, s * hw * 0.92, 0.25), at(hl, s * hw * 0.92, 0.25), at(hl, s * hw * 0.92, floor), at(-hl, s * hw * 0.92, floor), tone([40, 40, 46]));
+            quad(at(-hl, s * hw, floor), at(hl, s * hw, floor), at(hl, s * hw, top), at(-hl, s * hw, top), scale(body, s > 0 ? 1 : 0.84));
+            const out = s * (hw + 0.04);
+            quad(at(-hl + 1.4, out, 2.25), at(hl - 1.4, out, 2.25), at(hl - 1.4, out, 3.25), at(-hl + 1.4, out, 3.25), glass);
+            for (const d of [-hl * 0.62, hl * 0.62]) {
+              quad(at(d - 0.65, out * 1.01, floor + 0.1), at(d + 0.65, out * 1.01, floor + 0.1), at(d + 0.65, out * 1.01, 3.4), at(d - 0.65, out * 1.01, 3.4), tone([196, 200, 206]));
+            }
+            quad(at(-hl, s * hw, top), at(hl, s * hw, top), at(hl, 0, top + 0.4), at(-hl, 0, top + 0.4), tone(scale([214, 218, 226], s > 0 ? 1 : 0.9)));
+          }
+          for (const e of [-1, 1]) {
+            const lead = i === 0 && e > 0;
+            quad(at(e * hl, -hw, floor), at(e * hl, hw, floor), at(e * hl, hw, top), at(e * hl, -hw, top), lead ? tone([236, 194, 36]) : scale(body, 0.7));
+            if (lead) {
+              quad(at(hl + 0.05, -hw * 0.8, 2.5), at(hl + 0.05, hw * 0.8, 2.5), at(hl + 0.05, hw * 0.8, 3.6), at(hl + 0.05, -hw * 0.8, 3.6), tone([34, 40, 52]));
+              if (night > 0.2) {
+                for (const side of [-1, 1]) {
+                  glows.push({ mx: carX + ux * (hl + 0.2) + vx * side, my: carY + uy * (hl + 0.2) + vy * side, mz: base + 1.4, colour: [255, 244, 210], size: 0.25 });
+                }
+              }
+            }
+          }
+        });
       } else {
         const brown: RGB = [70, 48, 34];
         const legs: RGB = [120, 98, 76];
@@ -768,5 +836,202 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
   vignette.addColorStop(1, "rgba(0, 0, 0, 0.35)");
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, W, H);
+  if (shot.cab) {
+    drawCab(ctx, shot.cab, night);
+  }
   return canvas;
+}
+
+/** The inside of a cab round the view: window frame, wiper and the driver's bits and pieces. */
+function drawCab(ctx: CanvasRenderingContext2D, cab: NonNullable<GroundShot["cab"]>, night: number) {
+  const dark = night > 0.5;
+  const interior = dark ? "#14171c" : "#2c3139";
+  const trim = dark ? "#1f232a" : "#474e59";
+  const edge = dark ? "#0b0d10" : "#1b1e23";
+  const frame = (window: (c: CanvasRenderingContext2D) => void) => {
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    window(ctx);
+    ctx.fillStyle = interior;
+    ctx.fill("evenodd");
+    ctx.beginPath();
+    window(ctx);
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = 5;
+    ctx.stroke();
+  };
+  const glare = (x0: number, x1: number) => {
+    ctx.save();
+    ctx.globalAlpha = dark ? 0.04 : 0.08;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(x0, 0);
+    ctx.lineTo(x0 + 60, 0);
+    ctx.lineTo(x1 + 60, H);
+    ctx.lineTo(x1, H);
+    ctx.fill();
+    ctx.restore();
+  };
+  const dash = (top: number) => {
+    ctx.fillStyle = trim;
+    ctx.beginPath();
+    ctx.moveTo(0, top + 14);
+    ctx.quadraticCurveTo(W / 2, top - 6, W, top + 14);
+    ctx.lineTo(W, H);
+    ctx.lineTo(0, H);
+    ctx.fill();
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  };
+  const gauge = (x: number, y: number, r: number, angle: number) => {
+    ctx.fillStyle = dark ? "#2a3a2a" : "#e8e4d8";
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.strokeStyle = dark ? "#9cff9c" : "#c0281e";
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(angle) * r * 0.8, y + Math.sin(angle) * r * 0.8);
+    ctx.stroke();
+  };
+  const wiper = (px: number, py: number, angle: number, length: number) => {
+    const [ex, ey] = [px + Math.cos(angle) * length, py + Math.sin(angle) * length];
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#111317";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    const [nx, ny] = [-Math.sin(angle) * 5, Math.cos(angle) * 5];
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(px + (ex - px) * 0.2 + nx, py + (ey - py) * 0.2 + ny);
+    ctx.lineTo(ex + nx, ey + ny);
+    ctx.stroke();
+  };
+
+  if (cab.window !== "front") {
+    // A side window, with the windscreen pillar towards the front of the cab.
+    const right = cab.window === "right";
+    frame((c) => c.roundRect(W * 0.1, H * 0.07, W * 0.8, H * 0.62, 16));
+    glare(W * 0.3, W * 0.15);
+    ctx.fillStyle = edge;
+    ctx.fillRect(W * 0.5 - 4, H * 0.07, 8, H * 0.62);
+    ctx.fillStyle = trim;
+    ctx.fillRect(right ? 0 : W * 0.93, 0, W * 0.07, H);
+    dash(H * 0.74);
+    ctx.fillStyle = dark ? "#3a3f48" : "#8a929e";
+    ctx.beginPath();
+    ctx.roundRect(right ? W * 0.62 : W * 0.24, H * 0.83, W * 0.14, 12, 6);
+    ctx.fill();
+    if (cab.kind === "snowcat") {
+      ctx.fillStyle = "#15171b";
+      ctx.beginPath();
+      ctx.roundRect(right ? W * 0.8 : W * 0.12, H * 0.16, 34, 48, 6);
+      ctx.fill();
+      ctx.fillStyle = dark ? "#2d3440" : "#8fa4b8";
+      ctx.beginPath();
+      ctx.roundRect((right ? W * 0.8 : W * 0.12) + 4, H * 0.16 + 4, 26, 40, 4);
+      ctx.fill();
+    }
+    return;
+  }
+
+  if (cab.kind === "train") {
+    const bottom = H * 0.68;
+    frame((c) => c.roundRect(18, 10, W - 36, bottom - 10, 20));
+    glare(W * 0.55, W * 0.35);
+    wiper(W * 0.3, bottom - 6, -2.05, 150);
+    dash(bottom + 6);
+    gauge(W * 0.2, H * 0.87, 17, -0.6);
+    gauge(W * 0.31, H * 0.88, 12, 0.4);
+    ctx.fillStyle = dark ? "#0f2a33" : "#1d3b4a";
+    ctx.fillRect(W * 0.42, H * 0.8, W * 0.18, H * 0.13);
+    ctx.fillStyle = dark ? "#7fe0ff" : "#9fd8ea";
+    for (let i = 0; i < 3; i++) {
+      ctx.fillRect(W * 0.44, H * 0.83 + i * 9, W * (0.06 + i * 0.03), 3);
+    }
+    ctx.fillStyle = "#d42a1e";
+    ctx.beginPath();
+    ctx.arc(W * 0.67, H * 0.88, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.save();
+    ctx.translate(W * 0.8, H * 0.86);
+    ctx.rotate(-0.12);
+    ctx.fillStyle = dark ? "#8a8a80" : "#f4f1e6";
+    ctx.fillRect(-26, -18, 52, 40);
+    ctx.fillStyle = "#555";
+    for (let i = 0; i < 5; i++) {
+      ctx.fillRect(-20, -12 + i * 7, 30 + ((i * 7) % 10), 2);
+    }
+    ctx.restore();
+    return;
+  }
+
+  // The snowcat: a wide windscreen over the orange bonnet, levers, a thermos and a reminder.
+  const bottom = H * 0.7;
+  ctx.fillStyle = dark ? "#6e2a18" : "#d6462a";
+  ctx.beginPath();
+  ctx.moveTo(W * 0.24, bottom - 22);
+  ctx.lineTo(W * 0.76, bottom - 22);
+  ctx.lineTo(W * 0.92, bottom);
+  ctx.lineTo(W * 0.08, bottom);
+  ctx.fill();
+  const screen = (c: CanvasRenderingContext2D) => {
+    c.moveTo(W * 0.1, 12);
+    c.lineTo(W * 0.9, 12);
+    c.lineTo(W * 0.96, bottom);
+    c.lineTo(W * 0.04, bottom);
+    c.closePath();
+  };
+  frame(screen);
+  glare(W * 0.6, W * 0.45);
+  wiper(W * 0.5, 16, 1.15, 150);
+  dash(bottom + 4);
+  for (const x of [W * 0.16, W * 0.84]) {
+    ctx.fillStyle = "#121418";
+    ctx.beginPath();
+    ctx.roundRect(x - 5, H * 0.8, 10, H * 0.2, 4);
+    ctx.fill();
+    ctx.fillStyle = "#c8281e";
+    ctx.beginPath();
+    ctx.arc(x, H * 0.8, 9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  gauge(W * 0.3, H * 0.87, 14, -0.9);
+  ctx.save();
+  ctx.translate(W * 0.47, H * 0.86);
+  ctx.rotate(-0.08);
+  ctx.fillStyle = dark ? "#8f8a3a" : "#f5e663";
+  ctx.fillRect(-24, -18, 48, 34);
+  ctx.fillStyle = "#333";
+  ctx.font = "bold 9px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("HUSK", 0, -4);
+  ctx.fillText("DIESEL", 0, 8);
+  ctx.restore();
+  ctx.fillStyle = dark ? "#6d737c" : "#b8bec8";
+  ctx.beginPath();
+  ctx.roundRect(W * 0.64, H * 0.76, 18, 46, 5);
+  ctx.fill();
+  ctx.fillStyle = "#c8281e";
+  ctx.fillRect(W * 0.64, H * 0.76 - 4, 18, 9);
+  ctx.save();
+  ctx.translate(W * 0.13, 16);
+  ctx.rotate(0.25);
+  ctx.fillStyle = "#c8281e";
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(44, 0);
+  ctx.lineTo(0, 22);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 7px sans-serif";
+  ctx.fillText("1982", 3, 9);
+  ctx.restore();
 }

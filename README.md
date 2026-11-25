@@ -188,6 +188,33 @@ off, with rays and a lens flare. Posts can be about:
 Comments and likes follow, and each post nudges the club's reputation a little up or down. At most a
 post every few hours, and the same kind of post only every few days.
 
+### Taking pictures
+
+"Gå til" by each machine under Løypemaskiner shows it on the map and opens its card, or shows the
+garage when it is at home.
+
+"📹 Direkte fra førerhytta" on a snowcat's card, and "📹 Direkte fra førerhuset" on the train's, is a
+live view from the driver's seat while the game carries on: redrawn a few times a second, out of the windscreen or a side window, with the map following
+the machine unless "Følg på kartet" is switched off. At 1× the snowcat covers several tiles between
+frames, so the live view slows the whole game down: from the snowcat to ten times real time at
+first, from the train to real time, when it runs at about 80 km/h and stops at the stations; or
+"Sanntid", 10× or 3× sanntid, or back to the game's own speed ("Spillfart"). Picking a speed or closing the view
+ends the slow motion. Knips takes a picture from it without stopping the game.
+
+Click a skier, a snowcat out on the track or the train for a card about it, and the game pauses
+until the card is closed, so the subject stays put: a skier's name, age,
+kind of skier, where they came from, how far into the trip they are, their mood and a couple of
+made-up facts; the snowcat's night and season so far; the train's passengers and delay. 📷 Ta bilde
+opens a live preview, zooms the map in beside it and puts the labels away. Click or drag on the
+map where to stand (up to 40 m away; the camera zooms in from further off and tilts to keep the
+subject in frame) to photograph the subject. From a skier, "Utsikt herfra" looks wherever you point. The snowcat and
+the train are seen from the driver's seat instead: the windscreen or the left or right window, with
+the cab round the picture (pillars, wiper and dashboard; in the snowcat the orange bonnet, a thermos,
+a "HUSK DIESEL" note and a pennant from 1982). The lens can be taken over by
+hand: drag in the preview to turn and tilt, roll the wheel over it (or − / +) to zoom from 1× to
+6×, or use the arrow keys; Auto goes back to the automatic framing. Enter takes the picture. It can then be shared in the group, as a post from the club, or downloaded. Trees right by
+the camera and in the line of sight are left out, so the subject is never hidden behind a spruce.
+
 ### Seasons
 
 From 1 March, the season ends on the first night when hardly any track has snow left to ski on,

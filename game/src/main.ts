@@ -2,7 +2,7 @@ import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture } fr
 import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, EARLIEST_SEASON_END, FIRST_SEASON, GameClock, holiday, isWeekend, MAX_SEASON_DAYS, seasonName, setSeason, SPEEDS, weekday } from "./clock";
 import { meetingHtml, rating, seasonEdition, SeasonSummary, settleSummer, Summer, summarise, summerHtml } from "./season";
-import { COST_PER_TILE, Fleet, GARAGE_REACH } from "./groomer";
+import { COST_PER_TILE, Fleet, GARAGE_REACH, Groomer } from "./groomer";
 import { accountsHtml, DayAccount } from "./accounts";
 import { areas, Report, writeReport } from "./report";
 import { CABIN_REACH, CABIN_TIERS, EXPERTS, Kiosk, KIOSK_TIERS, OutletKind } from "./kiosk";
@@ -27,7 +27,7 @@ import {
   writeSlot,
 } from "./savegame";
 import { Skijorer } from "./skijor";
-import { around, Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, reachFrom, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
+import { around, Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, reachFrom, Skier, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
 import { TrackCrew } from "./crew";
 import { GameMap } from "./map";
 import { OVERVIEW_PX, renderOverview } from "./overview";
@@ -41,6 +41,7 @@ import { nightLights, streetLamps } from "./lights";
 import { Julehus, JULEHUS, LIGHTS_DOWN_DAY } from "./christmas";
 import { AlbumPhoto, albumHtml, keepInAlbum, seasonMap } from "./album";
 import { feedHtml, GROUP_NAME, Post, PostKind, writePost } from "./feed";
+import { cameraHtml, inspectHtml, LIVE_PACES, snapHtml, zoomLabel } from "./inspect";
 import { findRoute, RouteGround } from "./route";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, MIN_GROOMING_DEPTH, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
 import { Weather, WEATHER_ICON } from "./weather";
@@ -89,6 +90,40 @@ const START_BUDGET = 150_000;
 /** Tiles across and down in a posted photo, and its pixels per world pixel. */
 const PHOTO_TILES = [20, 13] as const;
 const PHOTO_RESOLUTION = 1.25;
+type PhotoMode = "of" | "from" | "front" | "left" | "right";
+/**
+ * Per subject: how close and how far off a photo can be taken, in tiles, and from how many metres
+ * away the camera starts zooming in. Beyond 40 m a skier is a dot; a train is 130 m long.
+ */
+const PHOTO_LENS = {
+  skier: { nearest: 0.2, farthest: 1.6, framing: 9 },
+  snowcat: { nearest: 0.35, farthest: 2.4, framing: 16 },
+  train: { nearest: 0.8, farthest: 6, framing: 60 },
+};
+const PHOTO_MAX_ZOOM = 4.5;
+/** How far ahead of the leading carriage's middle the driver sits. */
+const TRAIN_CAB_AHEAD_M = 12;
+/** How far the driver can turn their head from straight out of a window, in radians. */
+const CAB_TURN = 0.45;
+/** The map zoom step "Gå til" shows a snowcat at, at least. */
+const GOTO_ZOOM_LEVEL = 5;
+/** How often the live view from the snowcat is redrawn: each picture takes the better part of a tenth of a second. */
+const LIVE_FRAME_MS = 280;
+/**
+ * Live view starts at ten times real time from the snowcat (smooth enough to follow, quick enough
+ * that something happens) and at real time from the train, which is quick enough already.
+ */
+const LIVE_DEFAULT_PACE = { snowcat: 10, train: 1 };
+/** The train at real time: its top speed on the map is 45 px a second, a real one does about 80 km/h (14 px). */
+const TRAIN_REAL_RATE = 0.32;
+/** The map zoom step photo mode starts at, at least: close enough to place the camera within 40 m. */
+const PHOTO_ZOOM_LEVEL = 6;
+/** The lens by hand: zoom range and step, how far it tilts and per step, and radians per pixel dragged in the preview. */
+const PHOTO_LENS_MAX = 6;
+const PHOTO_ZOOM_STEP = 1.2;
+const PHOTO_TILT_MAX = 0.6;
+const PHOTO_TILT_STEP = 0.05;
+const PHOTO_DRAG = 0.004;
 const SKIER_COLOURS = [0xc8342b, 0x2f5fb0, 0xf2c12e, 0x3aa35a, 0x7a3fa0, 0x222831];
 /** How much one post in the local group moves the club's standing. */
 const FEED_REPUTATION = 0.004;
@@ -413,7 +448,7 @@ async function main() {
     alpine.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight());
     julehus.animate(dt, clock.day, 1 - clock.daylight(), s >= OVERVIEW_BELOW);
     skijorer.animate(dt, s >= OVERVIEW_BELOW, 1 - clock.daylight(), crowd.lights);
-    headLabels.visible = s >= OVERVIEW_BELOW;
+    headLabels.visible = s >= OVERVIEW_BELOW && !tucked.length;
     for (const label of headLabels.children) {
       label.scale.set(s < 1 ? 1 / s : 1);
     }
@@ -426,7 +461,7 @@ async function main() {
     if (detail.visible) {
       chunks.update(tl.x, tl.y, br.x, br.y);
     }
-    whimsy.update(dt, { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y });
+    whimsy.update(dt, { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y }, clock.paused, clock.slowMotion === null ? 1 : clock.slowMotion * TRAIN_REAL_RATE);
     crew.update(dt);
     drawEnds(dt);
     const kind = weather.precipRate <= 0 ? "none" : weather.temperature < 0.8 ? "snow" : "rain";
@@ -555,12 +590,14 @@ async function main() {
     barShow.innerHTML = `${TOOL_ICONS[tool]} ▴`;
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-speed]")) {
       const i = Number(btn.dataset.speed);
-      btn.classList.toggle("active", i < 0 ? clock.paused : !clock.paused && clock.speedIndex === i);
+      btn.classList.toggle("active", i < 0 ? clock.paused : !clock.paused && clock.slowMotion === null && clock.speedIndex === i);
     }
     const compactBar = document.documentElement.classList.contains("compact");
     speedChoice.textContent = clock.paused
       ? `⏸${compactBar ? "" : " Pause"} ${compactBar ? "▴" : "▾"}`
-      : `${compactBar ? "" : `${SPEED_ICONS[clock.speedIndex]} `}${SPEEDS[clock.speedIndex]}× ${compactBar ? "▴" : "▾"}`;
+      : clock.slowMotion !== null
+        ? `🐢${compactBar ? "" : " Sakte"} ${compactBar ? "▴" : "▾"}`
+        : `${compactBar ? "" : `${SPEED_ICONS[clock.speedIndex]} `}${SPEEDS[clock.speedIndex]}× ${compactBar ? "▴" : "▾"}`;
     speedChoice.classList.toggle("active", clock.paused);
     pausedBanner.hidden = !clock.paused || !timeStarted || asking || clock.seasonOver;
     const garageTool = document.querySelector<HTMLButtonElement>('[data-tool="garage"]')!;
@@ -572,12 +609,18 @@ async function main() {
       ${fleet.groomers.map((g, i) => {
         const k = kioskAt(g.garage.x, g.garage.y);
         return `<div class="row"><span class="name">🚜 ${g.name}</span> ${g.status}
+          <button class="goto" data-goto="${i}" title="Vis ${g.name} på kartet">Gå til</button>
           <button class="kiosk" data-kiosk="${i}" title="Vaffelsalg ved garasjen">🧇 ${k ? `${k.spec.short}${k.broken ? " (i ustand)" : ""}` : "Vaffelsalg?"}</button></div>`;
       }).join("")}
       ${kiosks.filter((k) => k.kind === "cabin").map((k) => `<div class="row"><span class="name">🛖 ${k.title}</span> ${k.spec.short}${k.spec.rooms ? ` · 🛏 ${k.guestsLastNight}` : ""}
           <button class="kiosk" data-cabin="${k.x},${k.y}">Åpne</button></div>`).join("")}`;
   };
   fleetPanel.addEventListener("pointerdown", (e) => {
+    const gotoButton = (e.target as HTMLElement).closest<HTMLElement>("[data-goto]");
+    if (gotoButton) {
+      goToGroomer(fleet.groomers[Number(gotoButton.dataset.goto)]);
+      return;
+    }
     const kioskButton = (e.target as HTMLElement).closest<HTMLElement>("[data-kiosk]");
     if (kioskButton) {
       openKiosk(Number(kioskButton.dataset.kiosk));
@@ -1283,14 +1326,11 @@ async function main() {
     }
   });
 
-  type View = Pick<GroundShot, "camera" | "target" | "subject" | "festive" | "brag">;
+  type View = Pick<GroundShot, "camera" | "target" | "subject" | "festive" | "brag" | "zoom" | "tilt" | "eye" | "cab">;
   const lampSpots = streetLamps(map).map((l) => [l.x, l.y] as [number, number]);
   /** A photo taken standing in the world, as a skier sees it; null while fast-forwarding. */
-  const groundShot = (view: View): string | null => {
-    if (fastForwarding) {
-      return null;
-    }
-    const canvas = groundPhoto({
+  const groundCanvas = (view: View): HTMLCanvasElement =>
+    groundPhoto({
       map,
       tracks,
       ...view,
@@ -1301,8 +1341,7 @@ async function main() {
       lamps: lampSpots,
       seed: Math.floor(clock.hours),
     });
-    return canvas.toDataURL("image/jpeg", 0.75);
-  };
+  const groundShot = (view: View): string | null => (fastForwarding ? null : groundCanvas(view).toDataURL("image/jpeg", 0.75));
   /** Stand on the track a few metres behind a point and look past it, along the track. */
   const viewAlongTrack = (x: number, y: number, subject?: View["subject"]): View | null => {
     const tile: [number, number] = [Math.floor(x), Math.floor(y)];
@@ -1363,7 +1402,7 @@ async function main() {
   /** Posts kept, and how many of the newest keep their photo; old photos would fill the save. */
   const FEED_KEPT = 30;
   const FEED_PHOTOS = 10;
-  const post = (kind: PostKind, at: [number, number] | null, extra: { km?: number; waffles?: number; driver?: string; road?: string } = {}, view: View | null = null) => {
+  const post = (kind: PostKind, at: [number, number] | null, extra: { km?: number; waffles?: number; driver?: string; road?: string; subject?: string } = {}, view: View | null = null) => {
     const [x, y] = at ?? [startPoi.x, startPoi.y];
     const p = writePost(kind, {
       day: clock.day,
@@ -1375,6 +1414,7 @@ async function main() {
       km: extra.km,
       waffles: extra.waffles,
       road: extra.road,
+      subject: extra.subject,
     }, view ? groundShot(view) : at ? takePhoto(x, y) : null, Math.floor(clock.hours * 7.3) + feed.length);
     feed.push(p);
     if (p.photo && at) {
@@ -1475,6 +1515,423 @@ async function main() {
       post("offtopic", null);
     }
   };
+
+  // Click a skier, a snowcat or the train: a card about it, and a camera to photograph it.
+  type Subject = { kind: "skier"; skier: Skier } | { kind: "snowcat"; groomer: Groomer } | { kind: "train" };
+  const inspectPanel = document.getElementById("inspect")!;
+  const photoLayer = new Graphics();
+  world.addChild(photoLayer);
+  let inspected: Subject | null = null;
+  /** The game holds still while a card is open, so the skier is still there for the picture. */
+  let inspectWasPaused = false;
+  /** zoom null follows the distance; tilt is added to the automatic framing. */
+  /** live: the snowcat's cab view, redrawn while the game runs; follow keeps the map on it. */
+  let shooting: { aim: [number, number]; mode: PhotoMode; snap: string | null; shared: boolean; zoom: number | null; tilt: number; turn: number; live: boolean; follow: boolean } | null = null;
+  /** Live view slows the game to this many game hours per real hour, or null for the game's own speed. */
+  const setLivePace = (pace: number | null) => {
+    clock.slowMotion = pace;
+    refreshHud();
+  };
+  /** Labels, cursors and bubbles are put away while aiming, and how they were. */
+  let tucked: { layer: Container; visible: boolean }[] = [];
+  const tuckAway = (away: boolean) => {
+    if (away && !tucked.length) {
+      tucked = notInPhotos().map((layer) => ({ layer, visible: layer.visible }));
+      tucked.forEach((t) => (t.layer.visible = false));
+    } else if (!away) {
+      tucked.forEach((t) => (t.layer.visible = t.visible));
+      tucked = [];
+    }
+  };
+
+  const subjectAt = (s: Subject): [number, number] | null => {
+    if (s.kind === "skier") {
+      return s.skier.done ? null : [s.skier.px, s.skier.py];
+    }
+    if (s.kind === "snowcat") {
+      return s.groomer.state === "home" ? null : [s.groomer.px, s.groomer.py];
+    }
+    const cars = whimsy.train?.carriages();
+    return cars?.length ? [cars.reduce((s, c) => s + c.x, 0) / cars.length / PX, cars.reduce((s, c) => s + c.y, 0) / cars.length / PX] : null;
+  };
+
+  /** Where the driver sits and which way the vehicle faces, for the views from the cab. */
+  const driverSeat = (s: Subject): { at: [number, number]; facing: number; eye: number } | null => {
+    if (s.kind === "snowcat") {
+      return s.groomer.state === "home" ? null : { at: [s.groomer.px, s.groomer.py], facing: s.groomer.facing, eye: 2.7 };
+    }
+    if (s.kind === "train" && whimsy.train) {
+      const lead = whimsy.train.carriages()[0];
+      const f = whimsy.train.facing;
+      const ahead = TRAIN_CAB_AHEAD_M / map.tileSize;
+      return { at: [lead.x / PX + Math.cos(f) * ahead, lead.y / PX + Math.sin(f) * ahead], facing: f, eye: 3.4 };
+    }
+    return null;
+  };
+
+  const pickSubject = (wx: number, wy: number): Subject | null => {
+    if (!detail.visible) {
+      return null;
+    }
+    const r = Math.max(9, 14 / camera.scale);
+    const skier = crowd.skiers.find((s) => !s.done && Math.hypot(s.px * PX - wx, s.py * PX - 6 - wy) < r);
+    if (skier) {
+      return { kind: "skier", skier };
+    }
+    const groomer = fleet.groomers.find((g) => g.state !== "home" && Math.hypot(g.px * PX - wx, g.py * PX - wy) < r + 6);
+    if (groomer) {
+      return { kind: "snowcat", groomer };
+    }
+    if (whimsy.train?.sprite.children.some((c) => Math.hypot(c.x - wx, c.y - wy) < r + 8)) {
+      return { kind: "train" };
+    }
+    return null;
+  };
+
+  const subjectLabel = (s: Subject): string =>
+    s.kind === "skier" ? `${s.skier.kind.name === "søndagsfamilie" ? "søndagsfamilien" : `${s.skier.kind.name}en`}` : s.kind === "snowcat" ? "løypemaskina" : "toget";
+
+  const subjectShape = (s: Subject, at: [number, number]): NonNullable<View["subject"]> => {
+    if (s.kind === "skier") {
+      return { kind: "skier", x: at[0], y: at[1], colour: s.skier.jacket };
+    }
+    if (s.kind === "snowcat") {
+      return { kind: "snowcat", x: at[0], y: at[1] };
+    }
+    const f = whimsy.train!.facing;
+    const cars = whimsy.train!.carriages().map((c): [number, number, number] => [c.x / PX, c.y / PX, Math.cos(c.angle - f) < 0 ? c.angle + Math.PI : c.angle]);
+    return { kind: "train", x: at[0], y: at[1], cars };
+  };
+
+  /** What the camera sees for the current aim: the subject from where the player stands, or the view from the subject. */
+  const photoView = (): View | null => {
+    const at = inspected && shooting ? subjectAt(inspected) : null;
+    if (!at || !shooting || !inspected) {
+      return null;
+    }
+    const mode = shooting.mode;
+    if (mode === "front" || mode === "left" || mode === "right") {
+      const seat = driverSeat(inspected);
+      if (!seat || inspected.kind === "skier") {
+        return null;
+      }
+      const a = seat.facing + (mode === "left" ? -Math.PI / 2 : mode === "right" ? Math.PI / 2 : 0) + shooting.turn;
+      const [sx, sy] = seat.at;
+      return {
+        camera: [sx, sy],
+        target: [sx + Math.cos(a) * 4, sy + Math.sin(a) * 4],
+        eye: seat.eye,
+        cab: { kind: inspected.kind, window: mode },
+        zoom: shooting.zoom ?? 1,
+        tilt: shooting.tilt,
+      };
+    }
+    const [ax, ay] = shooting.aim;
+    const len = Math.hypot(ax - at[0], ay - at[1]) || 1;
+    const [dx, dy] = [(ax - at[0]) / len, (ay - at[1]) / len];
+    if (mode === "from") {
+      return { camera: [at[0] + dx * 0.3, at[1] + dy * 0.3], target: [at[0] + dx * 4, at[1] + dy * 4], zoom: shooting.zoom ?? 1, tilt: shooting.tilt };
+    }
+    const lens = PHOTO_LENS[inspected.kind];
+    const dist = Math.max(lens.nearest, Math.min(lens.farthest, len));
+    // Zoom in from further away, so the subject stays about the size it would be from close by.
+    const zoom = shooting.zoom ?? Math.max(1, Math.min(PHOTO_MAX_ZOOM, (dist * map.tileSize) / lens.framing));
+    return { camera: [at[0] + dx * dist, at[1] + dy * dist], target: at, subject: subjectShape(inspected, at), zoom, tilt: shooting.tilt };
+  };
+
+  /** On the map: where the camera stands, what it sees, and a ring round the subject. Sized for the screen, not the map. */
+  const drawAim = () => {
+    photoLayer.clear();
+    const view = photoView();
+    const at = inspected ? subjectAt(inspected) : null;
+    if (!view || !at) {
+      return;
+    }
+    const k = 1 / camera.scale;
+    const [cx, cy] = [view.camera[0] * PX, view.camera[1] * PX];
+    const [tx, ty] = [view.target[0] * PX, view.target[1] * PX];
+    const a = Math.atan2(ty - cy, tx - cx);
+    const half = Math.atan(Math.tan((32 * Math.PI) / 180) / (view.zoom ?? 1));
+    const reach = Math.max(110 * k, Math.hypot(tx - cx, ty - cy) * 1.6);
+    const cone = [cx, cy, cx + Math.cos(a - half) * reach, cy + Math.sin(a - half) * reach, cx + Math.cos(a + half) * reach, cy + Math.sin(a + half) * reach];
+    photoLayer.poly(cone).fill({ color: 0xffb020, alpha: 0.35 }).stroke({ color: 0xffffff, width: 4 * k, join: "round" });
+    photoLayer.poly(cone).stroke({ color: 0xc25e00, width: 2 * k, join: "round" });
+    photoLayer.circle(at[0] * PX, at[1] * PX - 6, 13 * k).stroke({ color: 0xffffff, width: 4 * k }).stroke({ color: 0xe8591a, width: 2.5 * k });
+    photoLayer.circle(cx, cy, 8 * k).fill(0x1f2a44).stroke({ color: 0xffffff, width: 3 * k });
+    photoLayer.circle(cx, cy, 3.5 * k).fill(0x8fd0ff);
+  };
+
+  let previewPending = false;
+  const renderPreview = () => {
+    drawAim();
+    if (previewPending) {
+      return;
+    }
+    previewPending = true;
+    setTimeout(() => {
+      previewPending = false;
+      const view = photoView();
+      const canvas = inspectPanel.querySelector<HTMLCanvasElement>("canvas.preview");
+      if (!view || !canvas || fastForwarding) {
+        return;
+      }
+      canvas.getContext("2d")!.drawImage(groundCanvas(view), 0, 0, canvas.width, canvas.height);
+      const label = inspectPanel.querySelector(".lens .zoom");
+      if (label) {
+        label.textContent = zoomLabel(view.zoom ?? 1);
+      }
+      inspectPanel.querySelector("[data-inspect='auto']")?.classList.toggle("on", shooting?.zoom === null && shooting.tilt === 0);
+    }, 60);
+  };
+
+  const renderInspect = () => {
+    if (!inspected) {
+      return;
+    }
+    if (shooting?.snap) {
+      inspectPanel.innerHTML = snapHtml(shooting.snap, shooting.shared);
+    } else if (shooting) {
+      inspectPanel.innerHTML = cameraHtml({
+        kind: inspected.kind,
+        label: subjectLabel(inspected),
+        mode: shooting.mode,
+        zoom: photoView()?.zoom ?? 1,
+        manual: shooting.zoom !== null || shooting.tilt !== 0,
+        live: shooting.live ? { follow: shooting.follow, pace: clock.slowMotion } : undefined,
+      });
+      renderPreview();
+    } else if (inspected.kind === "skier") {
+      inspectPanel.innerHTML = inspectHtml({ kind: "skier", profile: inspected.skier.profile() });
+    } else if (inspected.kind === "snowcat") {
+      const g = inspected.groomer;
+      inspectPanel.innerHTML = inspectHtml({ kind: "snowcat", name: g.name, status: g.status, tonightKm: (g.groomedTonight * map.tileSize) / 1000, totalKm: (g.totalGroomed * map.tileSize) / 1000 });
+    } else {
+      inspectPanel.innerHTML = inspectHtml({ kind: "train", seed: Math.floor(clock.hours / 2) });
+    }
+    inspectPanel.hidden = false;
+  };
+
+  const closeInspect = () => {
+    tuckAway(false);
+    if (clock.slowMotion !== null) {
+      setLivePace(null);
+    }
+    if (inspected) {
+      clock.paused = inspectWasPaused;
+      refreshHud();
+    }
+    shooting = null;
+    inspected = null;
+    photoLayer.clear();
+    inspectPanel.hidden = true;
+  };
+
+  const openInspect = (s: Subject) => {
+    closeInspect();
+    inspectWasPaused = clock.paused;
+    clock.paused = true;
+    refreshHud();
+    inspected = s;
+    renderInspect();
+  };
+
+  /** Find a snowcat on the map: out on the track it gets its card, at home the garage is shown. */
+  const goToGroomer = (g: Groomer | undefined) => {
+    if (!g) {
+      return;
+    }
+    if (g.state === "home") {
+      camera.frame((g.garage.x + 0.5) * PX, (g.garage.y + 0.5) * PX, app.screen.width / 2, app.screen.height / 2, GOTO_ZOOM_LEVEL);
+      showToast(`🚜 ${g.name} står i garasjen.`);
+      return;
+    }
+    camera.frame(g.px * PX, g.py * PX, app.screen.width / 2, app.screen.height / 2, GOTO_ZOOM_LEVEL);
+    openInspect({ kind: "snowcat", groomer: g });
+  };
+
+  /** The screen point beside the photo panel where the subject is shown. */
+  const besidePanel = (): [number, number] => {
+    const card = inspectPanel.getBoundingClientRect();
+    return card.right < app.screen.width * 0.7
+      ? [(card.right + app.screen.width) / 2, app.screen.height / 2]
+      : [app.screen.width / 2, (card.bottom + app.screen.height) / 2];
+  };
+
+  const startShooting = (live = false) => {
+    const at = inspected ? subjectAt(inspected) : null;
+    if (!at) {
+      closeInspect();
+      return;
+    }
+    // Start a little south-east of the subject, so the first picture has something in it.
+    const away = PHOTO_LENS[inspected!.kind].framing / map.tileSize;
+    shooting = { aim: [at[0] + away * 0.8, at[1] + away * 0.6], mode: live ? "front" : "of", snap: null, shared: false, zoom: null, tilt: 0, turn: 0, live, follow: true };
+    if (live) {
+      clock.paused = false;
+      timeStarted = true;
+      setLivePace(clock.slowMotion ?? LIVE_DEFAULT_PACE[inspected!.kind === "train" ? "train" : "snowcat"]);
+    }
+    tuckAway(true);
+    renderInspect();
+    // Close enough to aim, with the subject beside the photo panel rather than under it.
+    camera.frame(at[0] * PX, at[1] * PX, ...besidePanel(), PHOTO_ZOOM_LEVEL);
+  };
+
+  /** Point the camera with the mouse or a finger: where to stand, or where to look. */
+  const aimAt = (sx: number, sy: number) => {
+    if (!shooting || shooting.snap || (shooting.mode !== "of" && shooting.mode !== "from")) {
+      return;
+    }
+    const w = world.toLocal({ x: sx, y: sy });
+    shooting.aim = [w.x / PX, w.y / PX];
+    renderPreview();
+  };
+
+  const turnAim = (by: number) => {
+    const at = inspected && shooting ? subjectAt(inspected) : null;
+    if (!at || !shooting || shooting.snap) {
+      return;
+    }
+    if (shooting.mode === "front" || shooting.mode === "left" || shooting.mode === "right") {
+      // From the driver's seat the head turns, within what the window shows.
+      shooting.turn = Math.max(-CAB_TURN, Math.min(CAB_TURN, shooting.turn + by));
+      renderPreview();
+      return;
+    }
+    const [dx, dy] = [shooting.aim[0] - at[0], shooting.aim[1] - at[1]];
+    const [c, s] = [Math.cos(by), Math.sin(by)];
+    shooting.aim = [at[0] + dx * c - dy * s, at[1] + dx * s + dy * c];
+    renderPreview();
+  };
+
+  /** Zoom by a factor from wherever the lens is now, automatic or not. */
+  const zoomBy = (factor: number) => {
+    if (!shooting || shooting.snap) {
+      return;
+    }
+    shooting.zoom = Math.max(1, Math.min(PHOTO_LENS_MAX, (photoView()?.zoom ?? 1) * factor));
+    renderPreview();
+  };
+
+  const tiltBy = (radians: number) => {
+    if (!shooting || shooting.snap) {
+      return;
+    }
+    shooting.tilt = Math.max(-PHOTO_TILT_MAX, Math.min(PHOTO_TILT_MAX, shooting.tilt + radians));
+    renderPreview();
+  };
+
+  const shoot = () => {
+    const view = photoView();
+    if (!shooting || !view) {
+      return;
+    }
+    shooting.snap = groundShot(view);
+    photoLayer.clear();
+    renderInspect();
+  };
+
+  // In the preview: drag sideways to turn, up and down to tilt, and roll the wheel to zoom.
+  let dragging: { x: number; y: number } | null = null;
+  inspectPanel.addEventListener("pointerdown", (e) => {
+    if ((e.target as HTMLElement).matches("canvas.preview")) {
+      dragging = { x: e.clientX, y: e.clientY };
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    }
+  });
+  inspectPanel.addEventListener("pointermove", (e) => {
+    if (!dragging) {
+      return;
+    }
+    const zoom = photoView()?.zoom ?? 1;
+    const perPixel = PHOTO_DRAG / zoom;
+    turnAim(-(e.clientX - dragging.x) * perPixel);
+    tiltBy((e.clientY - dragging.y) * perPixel);
+    dragging = { x: e.clientX, y: e.clientY };
+  });
+  inspectPanel.addEventListener("pointerup", () => (dragging = null));
+  inspectPanel.addEventListener("pointercancel", () => (dragging = null));
+  inspectPanel.addEventListener("wheel", (e) => {
+    if ((e.target as HTMLElement).matches("canvas.preview")) {
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? PHOTO_ZOOM_STEP : 1 / PHOTO_ZOOM_STEP);
+    }
+  }, { passive: false });
+
+  // The aim is drawn at a fixed size on screen, so it follows the zoom. The live view is redrawn a few times a second.
+  let lastLiveFrame = 0;
+  app.ticker.add(() => {
+    if (!shooting || shooting.snap) {
+      return;
+    }
+    if (shooting.live && inspected && inspected.kind !== "skier") {
+      const seat = driverSeat(inspected);
+      if (shooting.follow && seat) {
+        camera.follow(seat.at[0] * PX, seat.at[1] * PX, ...besidePanel());
+      }
+      const now = performance.now();
+      if (now - lastLiveFrame > LIVE_FRAME_MS && !clock.paused) {
+        lastLiveFrame = now;
+        renderPreview();
+      }
+      const status = inspectPanel.querySelector(".live-status");
+      if (status) {
+        const g = inspected.kind === "snowcat" ? inspected.groomer : null;
+        status.textContent = g
+          ? `${g.status} · ${((g.groomedTonight * map.tileSize) / 1000).toFixed(1).replace(".", ",")} km i natt`
+          : whimsy.train?.stopped ? "Står på stasjonen" : "Gjøvikbanen, i fart";
+      }
+    }
+    drawAim();
+  });
+
+  inspectPanel.addEventListener("click", (e) => {
+    const action = (e.target as HTMLElement).closest("button")?.dataset.inspect;
+    if (!action || !inspected) {
+      return;
+    }
+    if (action === "close" || action === "cancel") {
+      closeInspect();
+    } else if (action === "photo" || action === "live" || action === "again") {
+      startShooting(action === "live" || (action === "again" && !!shooting?.live));
+    } else if (action.startsWith("pace-") && shooting?.live) {
+      setLivePace(LIVE_PACES[inspected.kind === "train" ? "train" : "snowcat"][Number(action.slice(5))][0]);
+      renderInspect();
+    } else if (action === "follow" && shooting) {
+      shooting.follow = !shooting.follow;
+      renderInspect();
+    } else if ((action === "of" || action === "from" || action === "front" || action === "left" || action === "right") && shooting) {
+      shooting.mode = action;
+      shooting.zoom = null;
+      shooting.tilt = 0;
+      shooting.turn = 0;
+      renderInspect();
+    } else if (action === "shoot") {
+      shoot();
+    } else if (action === "zoom-in" || action === "zoom-out") {
+      zoomBy(action === "zoom-in" ? PHOTO_ZOOM_STEP : 1 / PHOTO_ZOOM_STEP);
+    } else if (action === "tilt-up" || action === "tilt-down") {
+      tiltBy(action === "tilt-up" ? PHOTO_TILT_STEP : -PHOTO_TILT_STEP);
+    } else if (action === "auto" && shooting) {
+      shooting.zoom = null;
+      shooting.tilt = 0;
+      renderPreview();
+    } else if (action === "share" && shooting?.snap && !shooting.shared) {
+      const view = photoView();
+      const at = subjectAt(inspected);
+      if (view && at) {
+        post("snapshot", [Math.floor(at[0]), Math.floor(at[1])], { subject: shooting.mode === "of" ? subjectLabel(inspected) : undefined }, view);
+        shooting.shared = true;
+        showToast("📱 Bildet er delt i gruppa.");
+        renderInspect();
+      }
+    } else if (action === "download" && shooting?.snap) {
+      const a = document.createElement("a");
+      a.href = shooting.snap;
+      a.download = `loype-tycoon-${dayLabel(clock.day).replace(/[^\p{L}\p{N}]+/gu, "-")}.jpg`;
+      a.click();
+    }
+  });
 
   /** The winter is over when, from March on, hardly any of the track has snow left to ski on. */
   const snowGone = (day: number): boolean => {
@@ -2833,7 +3290,21 @@ async function main() {
         return;
       }
     }
+    if (shooting) {
+      if (e.button === 0) {
+        aiming = true;
+        aimAt(e.offsetX, e.offsetY);
+      }
+      return;
+    }
     const w = world.toLocal({ x: e.offsetX, y: e.offsetY });
+    if (e.button === 0) {
+      const picked = pickSubject(w.x, w.y);
+      if (picked) {
+        openInspect(picked);
+        return;
+      }
+    }
     // A finger never hovers: tapping a tile is how its info shows up.
     describe(...tileAt(e.offsetX, e.offsetY));
     if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
@@ -2896,7 +3367,10 @@ async function main() {
       panning = { x: e.clientX, y: e.clientY };
     }
   });
+  /** Dragging the camera about in photo mode. */
+  let aiming = false;
   window.addEventListener("pointerup", () => {
+    aiming = false;
     if (pendingTouch && !pinch) {
       tapTile(...pendingTouch.tile);
     }
@@ -2929,6 +3403,10 @@ async function main() {
         }
         return;
       }
+    }
+    if (aiming) {
+      aimAt(e.offsetX, e.offsetY);
+      return;
     }
     const [x, y] = tileAt(e.offsetX, e.offsetY);
     describe(x, y);
@@ -3068,6 +3546,11 @@ async function main() {
     } else {
       clock.paused = false;
       clock.speedIndex = Math.max(0, Math.min(SPEEDS.length - 1, i));
+      // Picking a speed ends the live view's slow motion.
+      if (clock.slowMotion !== null) {
+        clock.slowMotion = null;
+        renderInspect();
+      }
     }
     refreshHud();
   };
@@ -3100,6 +3583,27 @@ async function main() {
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) {
+      return;
+    }
+    if (shooting && !shooting.snap) {
+      if (e.code === "Escape") {
+        closeInspect();
+      } else if (e.code === "Enter") {
+        shoot();
+      } else if (e.code === "ArrowLeft" || e.code === "ArrowRight") {
+        turnAim(e.code === "ArrowLeft" ? -0.17 : 0.17);
+      } else if (e.code === "ArrowUp" || e.code === "ArrowDown") {
+        tiltBy(e.code === "ArrowUp" ? PHOTO_TILT_STEP : -PHOTO_TILT_STEP);
+      } else if (e.key === "+" || e.key === "=" || e.key === "-") {
+        zoomBy(e.key === "-" ? 1 / PHOTO_ZOOM_STEP : PHOTO_ZOOM_STEP);
+      } else {
+        return;
+      }
+      e.preventDefault();
+      return;
+    }
+    if (inspected && e.code === "Escape") {
+      closeInspect();
       return;
     }
     const step = STEP_KEYS[e.code];

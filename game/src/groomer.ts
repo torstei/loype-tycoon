@@ -193,6 +193,11 @@ export class Groomer {
     return [Math.floor(this.px), Math.floor(this.py)];
   }
 
+  /** The way the machine faces, in radians on the map. */
+  get facing(): number {
+    return this.heading;
+  }
+
   update(hours: number, now: number, hourOfDay: number, schedule: Schedule, tracks: TrackNetwork, weather: Weather, ledger: Ledger) {
     if (this.state === "home") {
       this.considerLeaving(now, hourOfDay, schedule, tracks, weather);

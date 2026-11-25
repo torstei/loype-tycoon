@@ -157,6 +157,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #paused[hidden] { display: none; }
 @keyframes paused-pulse { 50% { transform: translateX(-50%) scale(1.05); } }
 
+#fleet button.goto { margin-left: auto; font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid #9fb4d0;
+  background: #f2f6fc; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+#fleet button.goto + button.kiosk { margin-left: 0; }
 #fleet button.kiosk { margin-left: auto; font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid #c9a045;
   background: #fff7e0; border-radius: 10px; cursor: pointer; white-space: nowrap; }
 #kiosk, #lift, #season { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px));
@@ -349,6 +352,30 @@ html.compact #accounts { width: calc(100vw - 16px); font-size: 13px; padding: 10
   display: flex; flex-direction: column; background: #e9ebef; border-radius: 8px; border: 1px solid #b9c2cf;
   box-shadow: 0 12px 34px rgba(20, 35, 70, 0.4); overflow: hidden; z-index: 6; font-size: 14px; }
 #feed[hidden] { display: none; }
+#inspect { position: fixed; left: 16px; top: 110px; width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 170px); overflow-y: auto;
+  padding: 10px 14px; background: #f7faff; border: 2px solid #1f5fd1; border-radius: 10px; z-index: 7; font-size: 14px;
+  box-shadow: 0 12px 34px rgba(20, 35, 70, 0.4); }
+#inspect[hidden] { display: none; }
+#inspect .head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+#inspect .head button { font: inherit; border: none; background: none; font-size: 18px; cursor: pointer; }
+#inspect .kind { color: #3d4f63; margin: 2px 0 6px; }
+#inspect ul { margin: 4px 0; padding-left: 18px; }
+#inspect li { margin: 2px 0; }
+#inspect .actions, #inspect .modes { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+#inspect .actions button, #inspect .modes button { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #9fb4d0; background: #fff; cursor: pointer; }
+#inspect .modes button.on { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
+#inspect .actions button.primary { background: #1f8a3a; color: #fff; border-color: #1f8a3a; font-weight: 700; }
+#inspect .actions button:disabled { opacity: 0.7; cursor: default; }
+#inspect canvas.preview, #inspect img.snap { display: block; width: 100%; border-radius: 6px; margin-top: 8px; background: #cfd8e3; }
+#inspect .lens { display: flex; align-items: center; gap: 4px; margin: 6px 0 0; }
+#inspect .lens button { font: inherit; min-width: 30px; padding: 3px 8px; border-radius: 6px; border: 1px solid #9fb4d0; background: #fff; cursor: pointer; }
+#inspect .lens button.on { background: #1f5fd1; color: #fff; border-color: #1f5fd1; }
+#inspect .lens button[data-inspect="tilt-up"] { margin-left: 8px; }
+#inspect .lens button[data-inspect="auto"] { margin-left: auto; }
+#inspect .lens .zoom { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
+#inspect canvas.preview { cursor: grab; touch-action: none; }
+#inspect .live-status { margin: 4px 0 0; font-size: 12px; color: #1f5fd1; font-weight: 600; }
+#inspect .hint { color: #3d4f63; font-size: 12px; margin: 6px 0 0; }
 #feed .bar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: #2f5fb0; color: #fff; }
 #feed .bar strong { flex: 1; }
 #feed .bar button { font: inherit; background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; }

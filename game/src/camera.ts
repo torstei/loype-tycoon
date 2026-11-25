@@ -55,6 +55,22 @@ export class Camera {
     this.zoomAt(sx, sy, 0);
   }
 
+  /** Zoom in to at least the given step and put the world point (wx, wy) at the screen point (sx, sy). */
+  frame(wx: number, wy: number, sx: number, sy: number, level: number) {
+    this.level = Math.max(this.level, level);
+    this.target = ZOOM_LEVELS[this.level];
+    this.anchor = null;
+    this.world.scale.set(this.target);
+    this.world.position.set(sx - wx * this.target, sy - wy * this.target);
+  }
+
+  /** Keep the world point (wx, wy) at the screen point (sx, sy), unless a zoom is under way. */
+  follow(wx: number, wy: number, sx: number, sy: number) {
+    if (!this.anchor) {
+      this.world.position.set(sx - wx * this.scale, sy - wy * this.scale);
+    }
+  }
+
   pan(dx: number, dy: number) {
     this.world.x += dx;
     this.world.y += dy;

@@ -452,6 +452,22 @@ class Train {
     return this.at(this.d);
   }
 
+  /** Standing at a station or at the end of the line. */
+  get stopped(): boolean {
+    return this.wait > 0;
+  }
+
+  /** The way the train is going, in radians: the first carriage leads. */
+  get facing(): number {
+    const p = this.position();
+    return p.angle + (this.dir < 0 ? Math.PI : 0);
+  }
+
+  /** Each carriage's middle and heading in world pixels, the leading one first. */
+  carriages(): { x: number; y: number; angle: number }[] {
+    return this.cars.map((car) => ({ x: car.x, y: car.y, angle: car.rotation }));
+  }
+
   update(dt: number) {
     if (this.wait > 0) {
       this.wait -= dt;
@@ -560,13 +576,19 @@ export class Whimsy {
     }
   }
 
-  update(dt: number, view: View) {
+  /**
+   * The train runs on the wall clock but stops with the game, and trainRate speeds it up or slows
+   * it down (the live view rides it at a real train's pace); smoke and bubbles carry on.
+   */
+  update(dt: number, view: View, paused: boolean, trainRate = 1) {
     this.time += dt;
     for (const m of this.moose) {
       m.animate(dt);
       m.sprite.visible = this.detail;
     }
-    this.train?.update(dt);
+    if (!paused) {
+      this.train?.update(dt * trainRate);
+    }
     this.bubbles.update(dt);
 
     this.smoke.clear();
