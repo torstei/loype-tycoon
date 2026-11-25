@@ -7,6 +7,7 @@ import { accountsHtml, DayAccount } from "./accounts";
 import { areas, Report, writeReport } from "./report";
 import { CABIN_REACH, CABIN_TIERS, EXPERTS, Kiosk, KIOSK_TIERS, OutletKind } from "./kiosk";
 import { showTouchTips, touchOnly } from "./mobile";
+import { StartScreen } from "./startscreen";
 import { showStartupError, watchForStaleBuild } from "./startup";
 import { DayNews, Edition, PRESS_DAYS, PRESS_DEMAND, PRESS_REPUTATION, PUBLISH_HOUR, PUBLISH_WEEKDAY, writeEdition } from "./varingen";
 import {
@@ -174,6 +175,8 @@ function chosenMap(): string {
 }
 
 async function main() {
+  const debug = new URLSearchParams(location.search).has("debug");
+  const start = debug ? null : new StartScreen();
   const updateCompact = () => document.documentElement.classList.toggle("compact", touchOnly() || innerWidth < COMPACT_BELOW);
   document.documentElement.classList.toggle("touch", touchOnly());
   /** The tool to fall back to: on a touchscreen one finger already pans, so looking around needs no tool of its own. */
@@ -234,7 +237,9 @@ async function main() {
   };
   const detail = chunks.layer;
   document.getElementById("loading")?.remove();
-  showTouchTips();
+  if (!start) {
+    showTouchTips();
+  }
   const mapW = map.width * PX;
   const mapH = map.height * PX;
   const frame = new Graphics()
@@ -4165,18 +4170,39 @@ async function main() {
   });
   document.getElementById("menu-button")!.addEventListener("click", () => toggleMenu());
 
+  let continuing = false;
   if (saved) {
     const problem = validate(saved, map);
     if (problem) {
       showToast(`Kunne ikke laste spillet: ${problem}`);
     } else {
       const message = restore(saved);
+      continuing = true;
       showToast(`💾 Fortsetter spillet fra ${saved.label.split(" · ")[0]}. ${message}`);
     }
   }
 
   redrawTracks();
   refreshHud();
+  start?.ready(
+    continuing
+      ? [
+          { label: "▶ Fortsett", primary: true, act: showTouchTips },
+          {
+            label: "Nytt spill",
+            act: () => {
+              if (confirm("Starte et nytt spill? Det som ikke er lagret på en egen plass eller til fil, blir borte.")) {
+                deleteSlot("auto");
+                setBoot({ kind: "new" });
+                reload();
+              } else {
+                showTouchTips();
+              }
+            },
+          },
+        ]
+      : [{ label: "▶ Spill", primary: true, act: showTouchTips }],
+  );
 }
 
 const SIGN_STYLE = {

@@ -417,3 +417,18 @@ html.compact #feed { left: 12px; right: 12px; width: auto; top: 12px; max-height
 #season figure { margin: 8px 0; cursor: zoom-out; }
 #season figure img { display: block; width: 100%; border-radius: 6px; }
 #season figure figcaption { font-size: 13px; color: #3d4f63; margin-top: 4px; }
+
+#start { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; overflow: hidden; background: linear-gradient(#8fb4e3, #cfe0f3 55%, #f4f8fc); transition: opacity 0.4s; cursor: default; }
+#start.closing { opacity: 0; pointer-events: none; }
+#start .hills { position: absolute; inset: auto 0 0 0; height: 40vh;
+  background: radial-gradient(ellipse 75vw 22vh at 15% 100%, #ffffff 98%, transparent 100%), radial-gradient(ellipse 80vw 18vh at 85% 100%, #f2f6fb 98%, transparent 100%),
+    radial-gradient(ellipse 110vw 30vh at 50% 100%, #e3ecf6 98%, transparent 100%); }
+#start svg.logo { position: relative; flex: none; width: min(1000px, 165vw); height: auto; overflow: visible; }
+#start .below { position: relative; min-height: 64px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+#start .status { margin: 0; font-size: 18px; font-weight: 700; color: #1c3f73; }
+#start .actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+#start .actions button { font: inherit; font-size: 18px; font-weight: 700; padding: 10px 22px; border-radius: 12px; cursor: pointer;
+  border: 3px solid #23323d; background: #fff; color: #23323d; box-shadow: 0 4px 0 #23323d; }
+#start .actions button.primary { background: #c8342b; border-color: #5b1712; color: #fff; box-shadow: 0 4px 0 #5b1712; }
+#start .actions button:active { transform: translateY(3px); box-shadow: 0 1px 0 #23323d; }
