@@ -149,8 +149,8 @@ const TOOL_NAMES: Record<Tool, string> = { look: "Se deg rundt", build: "Bygg l�
 const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
 const FLEET_PANEL = "loype-tycoon:fleet-panel";
-/** The machines, or the waffle stands and cabins: they share the corner of the screen, one at a time. */
-type FleetTab = "machines" | "sales";
+/** The vehicles, or the buildings: garages with their waffle stands, cabins and lifts. They share the corner of the screen, one at a time. */
+type FleetTab = "vehicles" | "buildings";
 const AUTO_OPEN = "loype-tycoon:auto-open:";
 /** On a phone the tile info goes away by itself, since there is no pointer leaving to hide it. */
 const COMPACT_INFO_MS = 5000;
@@ -513,14 +513,14 @@ async function main() {
   const topbar = document.getElementById("topbar")!;
   const fleetPanel = document.getElementById("fleet")!;
   const fleetButton = document.getElementById("fleet-button")!;
-  let fleetTab: FleetTab = "machines";
+  let fleetTab: FleetTab = "vehicles";
   let fleetOpen = false;
   try {
     const saved = JSON.parse(localStorage.getItem(FLEET_PANEL) ?? "{}");
-    fleetTab = saved.tab === "sales" ? "sales" : "machines";
+    fleetTab = saved.tab === "buildings" || saved.tab === "sales" ? "buildings" : "vehicles";
     fleetOpen = saved.open === true;
   } catch {
-    // Starts closed, on the machines.
+    // Starts closed, on the vehicles.
   }
   const rememberFleetPanel = () => {
     try {
@@ -642,10 +642,14 @@ async function main() {
     }
     return best;
   };
-  /** How a garage is told apart from the others: "ved Ekra", after the nearest named place. */
+  /** How a garage is told apart from the others: "ved Ekra", after the nearest named place, numbered when several share it. */
   const garageName = (g: Garage) => {
     const place = nearestPlace(g.x, g.y);
-    return place ? `ved ${place}` : `nr. ${fleet.garages.indexOf(g) + 1}`;
+    if (!place) {
+      return `nr. ${fleet.garages.indexOf(g) + 1}`;
+    }
+    const namesakes = fleet.garages.filter((o) => nearestPlace(o.x, o.y) === place);
+    return namesakes.length > 1 ? `ved ${place} (${namesakes.indexOf(g) + 1})` : `ved ${place}`;
   };
 
   const refreshHud = () => {
@@ -690,42 +694,68 @@ async function main() {
     fleetButton.classList.toggle("active", fleetOpen);
     fleetPanel.hidden = !fleetOpen || fleet.garages.length === 0;
     if (fleetPanel.hidden) {
-      fleetPanel.innerHTML = "";
       return;
     }
-    const stands = fleet.garages.flatMap((g, i) => {
-      const k = kioskAt(g.x, g.y);
-      return k ? [{ k, i, where: garageName(g) }] : [];
-    });
     const cabins = kiosks.filter((k) => k.kind === "cabin");
+    const lift = alpine.mainLift;
+    const tap = touchOnly() ? "trykk" : "klikk";
     const tab = (which: FleetTab, label: string) =>
       `<button class="tab${fleetTab === which ? " on" : ""}" data-tab="${which}">${label}</button>`;
-    const machines = [...fleet.groomers.map((g, i) => {
+    const goTo = (x: number, y: number, what: string) => `<button class="goto" data-at="${x},${y}" title="Vis ${what} på kartet">Gå til</button>`;
+    const vehicles = [...fleet.groomers.map((g, i) => {
       const drive = g.state === "home"
         ? `<button class="drive" data-drive="${i}" title="Send ${g.name} ut nå, uansett tid på døgnet">▶ Kjør ut</button>`
         : g.state === "grooming" ? `<button class="drive" data-drive="${i}" title="Kall ${g.name} hjem og spar diesel">⏹ Hjem</button>` : "";
-      return `<div class="row"><span class="name" title="Står i garasjen ${garageName(g.garage)}">🚜 ${g.name}</span> ${g.status}
+      return `<div class="row"><span class="name">🚜 ${g.name}</span> ${g.status}
         <span class="buttons">
         <button class="mode${g.onCall ? " on" : ""}" data-oncall="${i}" title="${g.onCall ? `${g.name} står i garasjen til du sender den ut. Klikk for å la den kjøre selv.` : `${g.name} kjører selv når løypene trenger det. Klikk for å la den stå til du sender den ut.`}">${g.onCall ? "✋ På vent" : "🔁 Auto"}</button>
         ${drive}
         <button class="drive" data-wheel="${i}" title="Kjør ${g.name} selv, fra førerhytta">🕹</button>
+        <button class="drive" data-kiosk="${fleet.garages.indexOf(g.garage)}" title="Garasjen ${garageName(g.garage)}">🏠</button>
         <button class="goto" data-goto="${i}" title="Vis ${g.name} på kartet">Gå til</button></span></div>`;
-    }), `<div class="row none">Løypemaskiner kjøpes ved en garasje: klikk på den på kartet.</div>`];
-    const sales = [
-      ...stands.map(({ k, i, where }) => `<div class="row"><span class="name">🧇 ${k.spec.short}</span> ${where}${k.broken ? " · i ustand" : ""}
-          <span class="buttons"><button class="kiosk" data-kiosk="${i}">Åpne</button></span></div>`),
+    }), `<div class="row none">Nye løypemaskiner kjøpes i en garasje: åpne den under Bygninger, eller ${tap} på den på kartet.</div>`];
+    const buildings = [
+      ...fleet.garages.map((g, i) => {
+        const parked = fleet.machinesAt(g).length;
+        const k = kioskAt(g.x, g.y);
+        const stand = k ? `🧇 ${k.spec.short}${k.broken ? " (i ustand)" : ""}` : `<span class="none">ingen vaffelsalg</span>`;
+        return `<div class="row"><span class="name">🏠 Garasjen ${garageName(g)}</span> 🚜 ${parked} · ${stand}
+          <span class="buttons">${goTo(g.x, g.y, "garasjen")}<button class="kiosk" data-kiosk="${i}">Åpne</button></span></div>`;
+      }),
       ...cabins.map((k) => `<div class="row"><span class="name">🛖 ${k.title}</span> ${k.spec.short}${k.spec.rooms ? ` · 🛏 ${k.guestsLastNight}` : ""}
-          <span class="buttons"><button class="kiosk" data-cabin="${k.x},${k.y}">Åpne</button></span></div>`),
-      `<div class="row none">Vaffelsalg startes ved en garasje: klikk på den på kartet.</div>`,
+          <span class="buttons">${goTo(k.x, k.y, "hytta")}<button class="kiosk" data-cabin="${k.x},${k.y}">Åpne</button></span></div>`),
+      ...(lift ? [lift] : []).map((l) => {
+        const [lx, ly] = l.line.pts[0].map(Math.floor);
+        return `<div class="row"><span class="name">🚡 ${l.name}</span> ${l.chair ? "stolheis" : "skitrekk, kan bli stolheis"}
+          <span class="buttons">${goTo(lx, ly, l.name)}<button class="kiosk" data-lift="${l.name}">Åpne</button></span></div>`;
+      }),
+      `<div class="row none">Nye garasjer og hytter bygges med byggeverktøyene.</div>`,
     ];
-    fleetPanel.innerHTML = `
-      <div class="head">
-        <span class="tabs">${tab("machines", `🚜 Maskiner (${fleet.groomers.length})`)}${tab("sales", `🧇 Salg (${stands.length + cabins.length})`)}</span>
-        ${fleetTab === "machines" ? `<button id="schedule">${fleet.schedule === "night" ? "🌙 Om natta" : "🕑 Døgnet rundt"}</button>` : ""}
-        <button class="fold" data-close title="Lukk (L)">✕</button></div>
-      <div class="list">${(fleetTab === "machines" ? machines : sales).join("")}</div>`;
+    const head = `
+        <span class="tabs">${tab("vehicles", `🚜 Kjøretøy (${fleet.groomers.length})`)}${tab("buildings", `🏠 Bygninger (${fleet.garages.length + cabins.length + (lift ? 1 : 0)})`)}</span>
+        ${fleetTab === "vehicles" ? `<button id="schedule">${fleet.schedule === "night" ? "🌙 Om natta" : "🕑 Døgnet rundt"}</button>` : ""}
+        <button class="fold" data-close title="Lukk (L)">✕</button>`;
+    if (!fleetPanel.querySelector(".list")) {
+      fleetPanel.innerHTML = `<div class="head"></div><div class="list"></div>`;
+    }
+    // Only what changed is replaced, and the list itself stays, so it keeps its scroll and a finger scrolling it.
+    const headEl = fleetPanel.querySelector<HTMLElement>(".head")!;
+    const listEl = fleetPanel.querySelector<HTMLElement>(".list")!;
+    const rows = (fleetTab === "vehicles" ? vehicles : buildings).join("");
+    if (headEl.dataset.html !== head) {
+      headEl.innerHTML = head;
+      headEl.dataset.html = head;
+    }
+    if (listEl.dataset.showing !== fleetTab) {
+      listEl.scrollTop = 0;
+      listEl.dataset.showing = fleetTab;
+    }
+    if (listEl.dataset.html !== rows) {
+      listEl.innerHTML = rows;
+      listEl.dataset.html = rows;
+    }
   };
-  fleetPanel.addEventListener("pointerdown", (e) => {
+  fleetPanel.addEventListener("click", (e) => {
     const tabButton = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]");
     if (tabButton) {
       showFleet(true, tabButton.dataset.tab as FleetTab);
@@ -767,6 +797,17 @@ async function main() {
     const kioskButton = (e.target as HTMLElement).closest<HTMLElement>("[data-kiosk]");
     if (kioskButton) {
       openKiosk(Number(kioskButton.dataset.kiosk));
+      return;
+    }
+    const atButton = (e.target as HTMLElement).closest<HTMLElement>("[data-at]");
+    if (atButton) {
+      const [x, y] = atButton.dataset.at!.split(",").map(Number);
+      camera.frame((x + 0.5) * PX, (y + 0.5) * PX, app.screen.width / 2, app.screen.height / 2, GOTO_ZOOM_LEVEL);
+      return;
+    }
+    const liftButton = (e.target as HTMLElement).closest<HTMLElement>("[data-lift]");
+    if (liftButton) {
+      openLift(liftButton.dataset.lift!);
       return;
     }
     const cabinButton = (e.target as HTMLElement).closest<HTMLElement>("[data-cabin]");
@@ -3129,6 +3170,11 @@ async function main() {
     const cabin = cabinNear(tx, ty, 1);
     if (cabin && tool === "build") {
       openCabin(cabin.x, cabin.y);
+      return;
+    }
+    const garage = fleet.garages.findIndex((g) => Math.max(Math.abs(g.x - tx), Math.abs(g.y - ty)) <= 1);
+    if (garage >= 0 && tool === "build") {
+      openKiosk(garage);
       return;
     }
     const station = tool === "build" ? alpine.stationNear(tx, ty) : undefined;

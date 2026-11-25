@@ -45,7 +45,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #fleet .head button.fold { margin-left: auto; padding: 2px 7px; border: none; font-size: 15px; }
 #fleet .head #schedule { margin-left: auto; }
 #fleet .head #schedule + button.fold { margin-left: 0; }
-#fleet .list { max-height: min(40vh, 320px); overflow-y: auto; border-top: 1px solid #c8d2da; padding-top: 4px; }
+#fleet .list { max-height: min(40vh, 320px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+  border-top: 1px solid #c8d2da; padding-top: 4px; }
 #fleet .none { color: #7a8690; font-style: italic; }
 #fleet .row { padding: 2px 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 #fleet .buttons { margin-left: auto; display: flex; gap: 4px; }
