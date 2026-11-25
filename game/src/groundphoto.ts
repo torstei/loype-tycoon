@@ -4,6 +4,15 @@ import { Flag, Terrain } from "./terrain";
 import { Condition, TrackNetwork } from "./tracks";
 
 /** What a ground-level photo shows: where the camera stands, what it looks at, and the light. */
+/** Someone or something drawn in the picture, at a position in tile units. */
+export interface Figure {
+  kind: "skier" | "snowcat" | "moose" | "train";
+  x: number;
+  y: number;
+  colour?: number;
+  cars?: [number, number, number][];
+}
+
 export interface GroundShot {
   map: GameMap;
   tracks: TrackNetwork;
@@ -17,7 +26,9 @@ export interface GroundShot {
   /** How the track looks where it is: grooves crisp, worn, icy or snowed in. */
   condition: (x: number, y: number) => Condition;
   /** A train is placed by its middle carriage; cars gives each carriage's middle and heading, the leading one first and facing the way it goes. */
-  subject?: { kind: "skier" | "snowcat" | "moose" | "train"; x: number; y: number; colour?: number; cars?: [number, number, number][] };
+  subject?: Figure;
+  /** Others in the picture who are not what it is about, such as skiers out on the track. */
+  others?: Figure[];
   /** Camera height above the ground in metres: a skier's eyes unless a driver's seat says otherwise. */
   eye?: number;
   /** Seen from a driver's seat: the frame, wiper and dashboard of the cab round the picture. */
@@ -55,6 +66,15 @@ const TREE_RANGE = 420;
 /** Metres kept clear of trees round the camera, and either side of the line to the subject. */
 const CLEAR_AROUND_CAMERA = 10;
 const CLEAR_SIGHTLINE = 7;
+/** A spruce's branches reach this share of its height out from the trunk. */
+const CANOPY = 0.3;
+/** Metres between the edge of a track or road and the tips of the nearest branches. */
+const VERGE = 0.8;
+/** Trees that would have to be smaller than this to keep off the track are left out. */
+const MIN_TREE = 4;
+const TALLEST_TREE = 22;
+/** How far round a line its segments are looked up: as far as the tallest tree's branches reach, and the line's own width. */
+const LINE_PAD = TALLEST_TREE * CANOPY + 6;
 const HOUSE_RANGE = 900;
 const NEAR = 0.4;
 
@@ -224,7 +244,7 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
       for (const [nx, ny] of shot.tracks.neighbours(x, y)) {
         if (ny * 100000 + nx > y * 100000 + x) {
           const [ax, ay, bx, by] = [(x + 0.5) * TILE, (y + 0.5) * TILE, (nx + 0.5) * TILE, (ny + 0.5) * TILE];
-          addSegment({ ax, ay, bx, by, len: Math.hypot(bx - ax, by - ay), kind: "track", look: shot.condition(x, y) }, 6);
+          addSegment({ ax, ay, bx, by, len: Math.hypot(bx - ax, by - ay), kind: "track", look: shot.condition(x, y) }, LINE_PAD);
         }
       }
     }
@@ -240,7 +260,7 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
         continue;
       }
       const [ax, ay, bx, by] = [a[0] * TILE, a[1] * TILE, b[0] * TILE, b[1] * TILE];
-      addSegment({ ax, ay, bx, by, len: Math.hypot(bx - ax, by - ay), kind: line.kind }, 8);
+      addSegment({ ax, ay, bx, by, len: Math.hypot(bx - ax, by - ay), kind: line.kind }, LINE_PAD);
     }
   }
   /** The nearest line at a point, with the signed distance across it and the distance along it. */
@@ -420,7 +440,7 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
     const sx = W / 2 + c.x * k;
     const base = HORIZON - c.y * k;
     const h = height * k;
-    const radius = height * 0.3 * k;
+    const radius = height * CANOPY * k;
     if (h < 1.5 || sx + radius < 0 || sx - radius > W || base - h > H) {
       return;
     }
@@ -497,9 +517,13 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
       const t = clamp01(((mx - c.ax) * dx + (my - c.ay) * dy) / (dx * dx + dy * dy || 1));
       return Math.hypot(mx - c.ax - dx * t, my - c.ay - dy * t) < c.half;
     });
-  const blocked = (mx: number, my: number) => {
+  /** How tall a tree here can grow before its branches hang over a track or road; 0 where none can stand. */
+  const roomFor = (mx: number, my: number): number => {
+    if (cleared(mx, my)) {
+      return 0;
+    }
     const l = lineAt(mx, my);
-    return (!!l && Math.abs(l.across) < HALF_WIDTH[l.s.kind] + 2.5) || cleared(mx, my);
+    return l ? Math.max(0, (Math.abs(l.across) - HALF_WIDTH[l.s.kind] - VERGE) / CANOPY) : Infinity;
   };
   // Whoever takes the picture steps out from behind the nearest spruce and sees the subject.
   const sightTo = shot.subject ? [shot.subject.x * TILE, shot.subject.y * TILE] : null;
@@ -527,10 +551,14 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
       for (let k = 0; k < count; k++) {
         const mx = (tx + hash(tx, ty, 20 + k)) * TILE;
         const my = (ty + hash(tx, ty, 40 + k)) * TILE;
-        if (!inView(mx, my, TREE_RANGE) || blocked(mx, my) || inTheWay(mx, my)) {
+        if (!inView(mx, my, TREE_RANGE) || inTheWay(mx, my)) {
           continue;
         }
-        trees.push({ x: mx, y: my, h: (terrain === Terrain.Bog ? 5 : 11) + hash(tx, ty, 60 + k) * 11, seed: tx * 31 + ty * 17 + k, d: toCam(mx, my, 0).z });
+        const h = Math.min(roomFor(mx, my), (terrain === Terrain.Bog ? 5 : 11) + hash(tx, ty, 60 + k) * (TALLEST_TREE - 11));
+        if (h < MIN_TREE) {
+          continue;
+        }
+        trees.push({ x: mx, y: my, h, seed: tx * 31 + ty * 17 + k, d: toCam(mx, my, 0).z });
       }
     }
   }
@@ -586,8 +614,9 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
 
   // The subject of the photo: cartoon shapes in screen space, outlined, drawn back to front.
   const glows: { mx: number; my: number; mz: number; colour: RGB; size: number }[] = [];
-  const subject = shot.subject;
-  if (subject) {
+  /** Others closer than this, in metres, would fill the frame or stand in the driver's lap. */
+  const NEAREST_OTHER = 4;
+  const drawFigure = (subject: Figure) => {
     const mx = subject.x * TILE;
     const my = subject.y * TILE;
     const ground = elevAt(mx, my);
@@ -742,6 +771,14 @@ export function groundPhoto(shot: GroundShot): HTMLCanvasElement {
       }
       paint();
     }
+  };
+  for (const other of shot.others ?? []) {
+    if (Math.hypot(other.x * TILE - cx, other.y * TILE - cy) > NEAREST_OTHER) {
+      drawFigure(other);
+    }
+  }
+  if (shot.subject) {
+    drawFigure(shot.subject);
   }
 
   // After dark: street lamps, outside lights, and Christmas lights.

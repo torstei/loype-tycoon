@@ -109,6 +109,8 @@ const CAB_TURN = 0.45;
 const GOTO_ZOOM_LEVEL = 5;
 /** How often the live view from the snowcat is redrawn: each picture takes the better part of a tenth of a second. */
 const LIVE_FRAME_MS = 280;
+/** Skiers further from the camera than this, in tiles, are too small to see in a picture. */
+const OTHERS_RANGE = 16;
 /**
  * Live view starts at ten times real time from the snowcat (smooth enough to follow, quick enough
  * that something happens) and at real time from the train, which is quick enough already.
@@ -1357,7 +1359,7 @@ async function main() {
     }
   });
 
-  type View = Pick<GroundShot, "camera" | "target" | "subject" | "festive" | "brag" | "zoom" | "tilt" | "eye" | "cab">;
+  type View = Pick<GroundShot, "camera" | "target" | "subject" | "others" | "festive" | "brag" | "zoom" | "tilt" | "eye" | "cab">;
   const lampSpots = streetLamps(map).map((l) => [l.x, l.y] as [number, number]);
   /** A photo taken standing in the world, as a skier sees it; null while fast-forwarding. */
   const groundCanvas = (view: View): HTMLCanvasElement =>
@@ -1590,7 +1592,7 @@ async function main() {
   /** Where the driver sits and which way the vehicle faces, for the views from the cab. */
   const driverSeat = (s: Subject): { at: [number, number]; facing: number; eye: number } | null => {
     if (s.kind === "snowcat") {
-      return s.groomer.state === "home" ? null : { at: [s.groomer.px, s.groomer.py], facing: s.groomer.facing, eye: 2.7 };
+      return s.groomer.state === "home" ? null : { at: [s.groomer.px, s.groomer.py], facing: s.groomer.looking, eye: 2.7 };
     }
     if (s.kind === "train" && whimsy.train) {
       const lead = whimsy.train.carriages()[0];
@@ -1653,7 +1655,18 @@ async function main() {
   };
 
   /** What the camera sees for the current aim: the subject from where the player stands, or the view from the subject. */
+  /** The skiers out on the track round a camera, except the one the picture is of. */
+  const skiersAround = (camera: [number, number]): NonNullable<View["others"]> =>
+    crowd.skiers
+      .filter((s) => !s.done && s.px > 0 && (inspected?.kind !== "skier" || inspected.skier !== s) && Math.hypot(s.px - camera[0], s.py - camera[1]) < OTHERS_RANGE)
+      .map((s) => ({ kind: "skier", x: s.px, y: s.py, colour: s.jacket }));
+
   const photoView = (): View | null => {
+    const view = framing();
+    return view && { ...view, others: skiersAround(view.camera) };
+  };
+
+  const framing = (): View | null => {
     const at = inspected && shooting ? subjectAt(inspected) : null;
     if (!at || !shooting || !inspected) {
       return null;

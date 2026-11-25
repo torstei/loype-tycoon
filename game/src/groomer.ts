@@ -9,6 +9,10 @@ const SPEED = 320;
 export const COST_PER_TILE = 10;
 const MAX_SHIFT_HOURS = 10;
 const MIN_JOB_TILES = 4;
+/** The driver looks at the middle of the next few tiles of the route, so a staircase of tiles reads as one diagonal. */
+const LOOK_AHEAD = 3;
+/** Tiles over which the gaze settles on a new direction. */
+const GAZE_TILES = 1;
 
 export const GARAGE_WITH_MACHINE_COST = 80_000;
 /** How close, in tiles, track must come for a garage's machine to drive onto it. */
@@ -31,6 +35,39 @@ export interface Steering {
 const JUNCTION_SPREAD = 1;
 /** Ways bending back further than this are not ways on. */
 const MAX_BEND = 2.2;
+
+type Tile = [number, number];
+
+/**
+ * The way on along the track from a tile, for a machine at pos facing heading that has just come along trail
+ * (newest last, ending with here); turn picks the way at a junction. Null at the end of a track.
+ */
+function wayOn(tracks: TrackNetwork, here: Tile, trail: Tile[], pos: [number, number], heading: number, turn: -1 | 0 | 1): { next: Tile; junction: boolean } | null {
+  const from = trail.length > 1 ? trail[trail.length - 2] : null;
+  const bend = ([x, y]: Tile) => {
+    const d = Math.atan2(y + 0.5 - pos[1], x + 0.5 - pos[0]) - heading;
+    return Math.atan2(Math.sin(d), Math.cos(d));
+  };
+  const recent = (t: Tile) => trail.some((r) => r[0] === t[0] && r[1] === t[1]);
+  const all = tracks.neighbours(...here).filter((n) => !recent(n) && Math.abs(bend(n)) < MAX_BEND);
+  // Skip the tiles that only sit beside the one just left: they are the same track, not a way on.
+  const ways = all.filter((n) => !from || Math.max(Math.abs(n[0] - from[0]), Math.abs(n[1] - from[1])) > 1);
+  const options = ways.length ? ways : all;
+  if (!options.length) {
+    return null;
+  }
+  const bends = options.map(bend);
+  const junction = Math.max(...bends) - Math.min(...bends) > JUNCTION_SPREAD;
+  const t = junction ? turn : 0;
+  const score = (b: number) => (t === 0 ? Math.abs(b) : -t * b);
+  let best = 0;
+  bends.forEach((b, i) => {
+    if (score(b) < score(bends[best])) {
+      best = i;
+    }
+  });
+  return { next: options[best], junction };
+}
 
 export interface Ledger {
   spend(amount: number): boolean;
@@ -182,6 +219,7 @@ export class Groomer {
   px: number;
   py: number;
   private heading = 0;
+  private gaze: [number, number] = [1, 0];
   private path: [number, number][] = [];
   private shift = 0;
   /** Game hours left waiting for a gap in the traffic. */
@@ -218,6 +256,51 @@ export class Groomer {
     return this.heading;
   }
 
+  /** The way the driver looks: the machine's heading, evened out over the last few tiles. */
+  get looking(): number {
+    return Math.atan2(this.gaze[1], this.gaze[0]);
+  }
+
+  private moveBy(dx: number, dy: number, tracks: TrackNetwork) {
+    const d = Math.hypot(dx, dy);
+    this.px += dx;
+    this.py += dy;
+    if (d === 0) {
+      return;
+    }
+    const ahead = this.ahead(tracks);
+    const [mx, my] = ahead.reduce(([sx, sy], [x, y]) => [sx + x + 0.5, sy + y + 0.5], [0, 0]).map((v) => v / (ahead.length || 1));
+    const [tx, ty] = ahead.length ? [mx - this.px, my - this.py] : [dx, dy];
+    const tl = Math.hypot(tx, ty) || 1;
+    const a = 1 - Math.exp(-d / GAZE_TILES);
+    this.gaze = [this.gaze[0] * (1 - a) + (tx / tl) * a, this.gaze[1] * (1 - a) + (ty / tl) * a];
+  }
+
+  /** The next few tiles the machine will drive: its planned route, or for the player, the track ahead as steered. */
+  private ahead(tracks: TrackNetwork): Tile[] {
+    if (!this.steering || !this.path.length) {
+      return this.path.slice(0, LOOK_AHEAD);
+    }
+    const out: Tile[] = [this.path[0]];
+    let trail: Tile[] = [...this.trail, this.path[0]];
+    let pos: [number, number] = [this.px, this.py];
+    let turn = this.steering.turn;
+    while (out.length < LOOK_AHEAD) {
+      const here = out[out.length - 1];
+      const centre: [number, number] = [here[0] + 0.5, here[1] + 0.5];
+      const heading = Math.atan2(centre[1] - pos[1], centre[0] - pos[0]);
+      const way = wayOn(tracks, here, trail, centre, heading, turn);
+      if (!way) {
+        break;
+      }
+      turn = way.junction ? 0 : turn;
+      out.push(way.next);
+      trail = [...trail.slice(-3), way.next];
+      pos = centre;
+    }
+    return out;
+  }
+
   update(hours: number, now: number, hourOfDay: number, schedule: Schedule, tracks: TrackNetwork, weather: Weather, ledger: Ledger) {
     if (this.state === "home") {
       this.considerLeaving(now, hourOfDay, schedule, tracks, weather);
@@ -246,8 +329,7 @@ export class Groomer {
           this.heading = Math.atan2(cy - this.py, cx - this.px);
         }
         if (dist <= budget) {
-          this.px = cx;
-          this.py = cy;
+          this.moveBy(cx - this.px, cy - this.py, tracks);
           budget -= dist;
           this.path.shift();
           const from = this.trail.at(-1);
@@ -266,8 +348,7 @@ export class Groomer {
             continue;
           }
         } else {
-          this.px += ((cx - this.px) / dist) * budget;
-          this.py += ((cy - this.py) / dist) * budget;
+          this.moveBy(((cx - this.px) / dist) * budget, ((cy - this.py) / dist) * budget, tracks);
           budget = 0;
         }
       }
@@ -317,46 +398,28 @@ export class Groomer {
   }
 
   /** Where the player's steering takes the machine from this tile: on along the track, the chosen way at a junction, or back. */
-  private nextDriven(tracks: TrackNetwork): [number, number] | null {
+  private nextDriven(tracks: TrackNetwork): Tile | null {
     const steer = this.steering!;
     const here = this.tile;
-    const from = this.trail.length > 1 ? this.trail.at(-2)! : null;
-    const same = (a: [number, number], b: [number, number]) => a[0] === b[0] && a[1] === b[1];
     if (steer.turnAround) {
       steer.turnAround = false;
+      const from = this.trail.length > 1 ? this.trail[this.trail.length - 2] : null;
       this.heading += Math.PI;
+      this.gaze = [-this.gaze[0], -this.gaze[1]];
       this.trail = [here];
       return from && tracks.has(...from) ? from : this.nextDriven(tracks);
     }
-    const bend = ([x, y]: [number, number]) => {
-      const d = Math.atan2(y + 0.5 - this.py, x + 0.5 - this.px) - this.heading;
-      return Math.atan2(Math.sin(d), Math.cos(d));
-    };
-    const recent = (t: [number, number]) => this.trail.some((r) => same(r, t));
-    const all = tracks.neighbours(...here).filter((n) => !recent(n) && Math.abs(bend(n)) < MAX_BEND);
-    // Skip the tiles that only sit beside the one just left: they are the same track, not a way on.
-    const ways = all.filter((n) => !from || Math.max(Math.abs(n[0] - from[0]), Math.abs(n[1] - from[1])) > 1);
-    const options = ways.length ? ways : all;
-    if (!options.length) {
+    const way = wayOn(tracks, here, this.trail, [this.px, this.py], this.heading, steer.turn);
+    if (!way) {
       steer.go = false;
       this.status = "Enden av løypa, snu";
       return null;
     }
-    const bends = options.map(bend);
-    const junction = Math.max(...bends) - Math.min(...bends) > JUNCTION_SPREAD;
-    const turn = junction ? steer.turn : 0;
-    if (junction) {
+    if (way.junction) {
       steer.turn = 0;
     }
-    const score = (b: number) => (turn === 0 ? Math.abs(b) : -turn * b);
-    let best = 0;
-    bends.forEach((b, i) => {
-      if (score(b) < score(bends[best])) {
-        best = i;
-      }
-    });
     this.status = "Du kjører";
-    return options[best];
+    return way.next;
   }
 
   /** Take the controls, sending the machine out first if it is at home; null when it can go, or why it cannot. */
