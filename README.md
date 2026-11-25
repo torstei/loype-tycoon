@@ -331,8 +331,50 @@ python3 -m venv .venv
 The first form makes a region listed in `REGIONS`. The second makes any square in Norway (the
 elevation comes from Kartverket) by its centre in degrees and its width in kilometres, from 2 to 15.
 The game plays a map at `?map=<name>`, and Hakadal when none is given. Each map keeps its own save
-slots. The game starts at the station named like the map's title. Without one it starts at the
-station, parking or named place nearest the middle of the map. The Christmas house is only on Hakadal.
+slots.
+
+### The region file
+
+`<name>.json` is generated and never edited by hand: regenerating it replaces it. What a person
+decides about a map goes in `<name>.region.json` beside it. The map tool writes a starter one for a
+new map and never overwrites one that exists. Every field is optional:
+
+```json
+{
+  "title": "Hakadal",
+  "start": { "place": "Hakadal", "kind": "station" },
+  "names": {
+    "newspaper": "Varingen",
+    "group": "Preppestatus Hakadal og omegn",
+    "unofficialGroup": "Skiføre i Hakadal (uoffisiell)",
+    "railway": "Gjøvikbanen",
+    "trainEnds": ["Gjøvik", "Oslo S"],
+    "skiArea": "Varingskollen",
+    "waffleClub": "Nittedal Skytterlag"
+  },
+  "climate": { "valley": 200, "high": 500 },
+  "christmasHouse": { "lat": 60.097103, "lon": 10.867278, "street": "Hadelandsveien" },
+  "places": {
+    "rename": { "Name on the map": "Better name" },
+    "hide": ["A place that should not show"],
+    "add": [{ "kind": "parking", "name": "Skistua", "lat": 60.1, "lon": 10.8 }]
+  }
+}
+```
+
+- `start` and `christmasHouse` are either a named place on the map (with `kind` when several share
+  the name: station, parking, place, peak, cafe or cabin) or a point in degrees, as copied from any
+  web map. Without `start` the game starts at the station named like the title, else the station,
+  parking or named place nearest the middle of the map.
+- `names` go into the texts: the paper, the group in the feed, the railway, the ski area with its
+  chairlift and the shooting club that runs the waffle stand. Left out, they are made from the title
+  ("Preppestatus Lillehammer", "Lillehammer Skytterlag"), with "Lokalavisa", "jernbanen" and
+  "alpinbakken". Use invented names for organisations, as Hakadal does.
+- `climate` is the valley floor the weather is for, and a height where the snow lies longer, in
+  metres. Without it the valley is the height of the start point, and the high snow 300 m above.
+- Without `christmasHouse` there is no Christmas house, and no stories about it.
+- `places` corrects the places from OpenStreetMap, applied when the game loads, so they survive
+  regenerating the map.
 
 Every map is cut from one global grid of 25 m tiles in EPSG:25833 (UTM 33N): grid tile
 (col, row) covers easting `col·25 … +25` and northing `row·25 … +25`. Regions are defined in

@@ -1,8 +1,6 @@
 import { Graphics } from "pixi.js";
 import { hash, PX } from "./render";
 
-/** The house in Hadelandsveien that ends up in Varingen every December for its Christmas lights. */
-export const JULEHUS = { map: "hakadal", x: 294, y: 239, name: "julehuset i Hadelandsveien" };
 
 /** Tjugendedag, 13 January, when Christmas is over and the lights come down. */
 export const LIGHTS_DOWN_DAY = 43;
@@ -32,9 +30,14 @@ export class Julehus {
   private bulbs: Bulb[] = [];
   private t = 0;
 
-  constructor() {
-    const cx = (JULEHUS.x + 0.5) * PX;
-    const cy = (JULEHUS.y + 0.5) * PX;
+  /** The house's tile; the lights stay dark where there is no such house. */
+  constructor(readonly house: { x: number; y: number } | null) {
+    this.lights.visible = !!house;
+    if (!house) {
+      return;
+    }
+    const cx = (house.x + 0.5) * PX;
+    const cy = (house.y + 0.5) * PX;
     const b = this.bulbs;
     line(b, cx - 9, cy - 1, cx, cy - 9, 1.8, 1);
     line(b, cx, cy - 9, cx + 9, cy - 1, 1.8, 2);
@@ -69,13 +72,13 @@ export class Julehus {
   animate(dt: number, day: number, darkness: number, detail: boolean) {
     const on = day <= LIGHTS_DOWN_DAY ? Math.min(1, Math.max(0, (darkness - 0.15) / 0.4)) : 0;
     this.lights.alpha = on;
-    if (on === 0) {
+    if (on === 0 || !this.house) {
       return;
     }
     this.t += dt;
     const g = this.lights.clear();
-    const cx = (JULEHUS.x + 0.1) * PX;
-    const cy = (JULEHUS.y + 0.6) * PX;
+    const cx = (this.house.x + 0.1) * PX;
+    const cy = (this.house.y + 0.6) * PX;
     const hue = COLOURS[Math.floor(this.t * 0.8) % COLOURS.length];
     for (const [r, a] of [[PX * 5, 0.05], [PX * 3, 0.08], [PX * 1.7, 0.1]]) {
       g.circle(cx, cy, r).fill({ color: hue, alpha: a });
@@ -92,6 +95,6 @@ export class Julehus {
   }
 
   near(x: number, y: number) {
-    return Math.abs(x - JULEHUS.x) <= 1.5 && Math.abs(y - JULEHUS.y) <= 1.5;
+    return !!this.house && Math.abs(x - this.house.x) <= 1.5 && Math.abs(y - this.house.y) <= 1.5;
   }
 }

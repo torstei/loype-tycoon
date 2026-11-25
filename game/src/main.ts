@@ -30,7 +30,8 @@ import {
 import { Skijorer } from "./skijor";
 import { around, Crowd, DayStats, emptyDay, HOMES_REACH, MEMBERSHIP_FEE, reachFrom, Skier, SKIERS_PER_HOUSE, Trailhead } from "./skiers";
 import { TrackCrew } from "./crew";
-import { GameMap, Poi } from "./map";
+import { GameMap } from "./map";
+import { applyRegion, capital, loadRegionFile, region } from "./region";
 import { OVERVIEW_PX, renderOverview } from "./overview";
 import { hash, landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
@@ -39,9 +40,9 @@ import { askCrossing } from "./crossing";
 import { Alpine, CHAIRLIFT_PRICE } from "./alpine";
 import { GroundShot, groundPhoto, sunDirection } from "./groundphoto";
 import { nightLights, streetLamps } from "./lights";
-import { Julehus, JULEHUS, LIGHTS_DOWN_DAY } from "./christmas";
+import { Julehus, LIGHTS_DOWN_DAY } from "./christmas";
 import { AlbumPhoto, albumHtml, keepInAlbum, seasonMap } from "./album";
-import { feedHtml, GROUP_NAME, personName, Post, PostKind, writePost } from "./feed";
+import { feedHtml, personName, Post, PostKind, writePost } from "./feed";
 import { cameraHtml, inspectHtml, LIVE_PACES, snapHtml, zoomLabel } from "./inspect";
 import { findRoute, RouteGround } from "./route";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, MIN_GROOMING_DEPTH, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
@@ -168,22 +169,6 @@ function chosenMap(): string {
   return asked && /^[a-z0-9-]+$/.test(asked) ? asked : DEFAULT_MAP;
 }
 
-/**
- * Where the game starts: the station named after the map, else the station, parking or named place
- * nearest the middle of the map, else the middle itself.
- */
-function startPoint(map: GameMap): Poi {
-  const [mx, my] = [map.width / 2, map.height / 2];
-  const nearest = (kind: Poi["kind"]) =>
-    map.pois.filter((p) => p.kind === kind && (kind !== "place" || p.name)).sort((a, b) => Math.hypot(a.x - mx, a.y - my) - Math.hypot(b.x - mx, b.y - my))[0];
-  return (
-    map.pois.find((p) => p.kind === "station" && p.name === map.title) ??
-    nearest("station") ??
-    nearest("parking") ??
-    nearest("place") ?? { kind: "place", name: null, x: Math.floor(mx), y: Math.floor(my) }
-  );
-}
-
 async function main() {
   const updateCompact = () => document.documentElement.classList.toggle("compact", touchOnly() || innerWidth < COMPACT_BELOW);
   document.documentElement.classList.toggle("touch", touchOnly());
@@ -191,7 +176,9 @@ async function main() {
   const restingTool = (): Tool => (touchOnly() ? "build" : "look");
   updateCompact();
   window.addEventListener("resize", updateCompact);
-  const map = await GameMap.load(chosenMap());
+  const [map, regionFile] = await Promise.all([GameMap.load(chosenMap()), loadRegionFile(chosenMap())]);
+  applyRegion(map, regionFile);
+  document.querySelectorAll(".newspaper").forEach((e) => (e.textContent = region.names.newspaper));
   useSaveSpace(map.name);
   // Pick up where we left off: an explicit load or new game, otherwise the autosave.
   const boot = takeBoot();
@@ -258,7 +245,7 @@ async function main() {
   world.addChild(cursor);
   const whimsy = new Whimsy(map);
   world.addChild(whimsy.layer);
-  const startPoi = startPoint(map);
+  const startPoi = { x: region.start[0], y: region.start[1] };
   const crew = new TrackCrew(startPoi.x, startPoi.y);
   world.addChild(crew.layer);
   const labels = new Container();
@@ -271,8 +258,7 @@ async function main() {
   const night = new Graphics();
   const lightsWorld = new Container();
   const townLights = nightLights(map);
-  const julehus = new Julehus();
-  julehus.lights.visible = map.name === JULEHUS.map;
+  const julehus = new Julehus(region.christmasHouse);
   lightsWorld.addChild(townLights, julehus.lights, alpine.lights, crowd.lights, fleet.lights, whimsy.bubbleLayer, skijorer.bubble, crowd.bubbles);
   const precipitation = new Precipitation();
   app.stage.addChild(night, lightsWorld, precipitation.layer);
@@ -597,7 +583,7 @@ async function main() {
     const km = (tracks.size * map.tileSize) / 1000;
     const nowIcon = weather.precipRate > 0 ? (weather.temperature < 0.8 ? "🌨️" : "🌧️") : clock.daylight() > 0.5 ? "☀️" : "🌙";
     hud.innerHTML = `
-      <strong class="title">Løype Tycoon · ${map.title}</strong>
+      <strong class="title">Løype Tycoon · ${region.title}</strong>
       <span class="clock">${clock.paused ? "⏸ " : ""}${clock.label()}</span>
       <span class="weather">${nowIcon} <span class="wide-only">${weather.temperature.toFixed(0)} °C · snø ${weather.snowDepth.toFixed(0)} cm</span><span class="compact-only">${weather.temperature.toFixed(0)}°</span></span>
       <button class="cash" title="Regnskap (K)"><span class="wide-only">Kasse: </span>${kr(budget)}</button>
@@ -794,10 +780,10 @@ async function main() {
     const head = crowd.trailheads.find((h) => h.kind === "lift");
     const status = `${lift.chair ? "Stolheis" : "Skitrekk"} · ${open ? `åpent nå · ${alpine.people} i bakkene` : "åpent 17–21 på hverdager og 10–16 i helgene, når det er snø"}`;
     const offer = !main
-      ? `<p class="note">Et av skitrekkene i Varingskollen. Det lengste, ${alpine.mainLift?.name}, kan bli stolheis.</p>`
+      ? `<p class="note">Et av skitrekkene i ${region.names.skiArea}. Det lengste, ${alpine.mainLift?.name}, kan bli stolheis.</p>`
       : lift.chair
         ? `<table><tr class="current"><td><strong>Stolheisen går</strong><br><small>${head?.entry ? `Langrennsløpere tar heisen opp og går ut fra toppen: ${head.today} i dag.` : "Legg løype fra toppstasjonen, så tar langrennsløperne heisen opp."}</small></td><td><span class="owned">✓ Spleiset</span></td></tr></table>`
-        : `<table><tr><td><strong>Stolheis</strong><br><small>I Varingskollen har det lenge vært snakk om å bytte ut ${lift.name} med stolheis. Løypelaget kan spleise: da kommer langrennsfolk også til topps, med skiene på beina og stavene i fanget.</small><br>
+        : `<table><tr><td><strong>Stolheis</strong><br><small>I ${region.names.skiArea} har det lenge vært snakk om å bytte ut ${lift.name} med stolheis. Løypelaget kan spleise: da kommer langrennsfolk også til topps, med skiene på beina og stavene i fanget.</small><br>
           <small class="facts">Ny startplass ved toppstasjonen, ${topElevation} moh · ${extraSnow > 0 ? `${extraSnow} cm mer snø enn ved bunnen i dag` : "snøen ligger lengst der oppe"} · går når bakken er åpen</small></td>
           <td><button data-lift="chair" ${CHAIRLIFT_PRICE > budget ? "disabled" : ""}>Spleis ${kr(CHAIRLIFT_PRICE)}</button></td></tr></table>
           <p class="note">Løypelagets andel. Resten tar alpinbakken og en sparebankstiftelse med sans for heiser.</p>`;
@@ -822,7 +808,7 @@ async function main() {
       alpine.buildChairlift();
       openChairliftHead();
       chairliftToday = alpine.mainLift?.name ?? null;
-      showToast("🚡 <strong>Stolheis i Varingskollen!</strong> Legg løype fra toppstasjonen, så tar langrennsløperne heisen opp når bakken er åpen.");
+      showToast(`🚡 <strong>Stolheis i ${region.names.skiArea}!</strong> Legg løype fra toppstasjonen, så tar langrennsløperne heisen opp når bakken er åpen.`);
       renderLift();
       refreshHud();
     }
@@ -922,7 +908,7 @@ async function main() {
         budget -= EXPERTS.price;
         k.hireExperts();
         expertsHiredToday = true;
-        showToast("🎯 <strong>Avtale med Nittedal Skytterlag!</strong> Fra lørdag står skytterlagets beste vaffelsteikere ved jernet. Treffsikkert.");
+        showToast(`🎯 <strong>Avtale med ${region.names.waffleClub}!</strong> Fra lørdag står skytterlagets beste vaffelsteikere ved jernet. Treffsikkert.`);
         renderKiosk();
         refreshHud();
       }
@@ -1301,7 +1287,7 @@ async function main() {
         showToast(`🗞 ${effect}`);
       }
     } else {
-      showToast(`🗞 <strong>Varingen er ute:</strong> «${edition.headline}» ${effect} <button class="read" data-open="paper">Les avisa</button>`, 15000);
+      showToast(`🗞 <strong>${region.names.newspaper} er ute:</strong> «${edition.headline}» ${effect} <button class="read" data-open="paper">Les avisa</button>`, 15000);
     }
     if (paperPanel.hidden) {
       paperButton.classList.add("unread");
@@ -1327,11 +1313,11 @@ async function main() {
     const edition = paper.editions[editionIndex];
     const bar = `<div class="bar">
         <button data-p="prev" ${editionIndex <= 0 ? "disabled" : ""}>‹</button>
-        <strong>🗞 Varingen</strong>
+        <strong>🗞 ${region.names.newspaper}</strong>
         <button data-p="next" ${editionIndex >= paper.editions.length - 1 ? "disabled" : ""}>›</button>
         <button data-p="close">✕</button>
       </div>`;
-    paperPanel.innerHTML = `${bar}<div class="page">${edition ? edition.html : "<p class=\"empty\">Varingen kommer ut hver torsdag. Gi dem noe å skrive om.</p>"}</div>${autoOpenToggle("paper")}`;
+    paperPanel.innerHTML = `${bar}<div class="page">${edition ? edition.html : `<p class="empty">${region.names.newspaper} kommer ut hver torsdag. Gi dem noe å skrive om.</p>`}</div>${autoOpenToggle("paper")}`;
   };
 
   paperPanel.addEventListener("click", (e) => {
@@ -1369,7 +1355,7 @@ async function main() {
   const placeNear = (x: number, y: number) =>
     placeNames.reduce((best, p) => (Math.hypot(p.x - x, p.y - y) < Math.hypot(best.x - x, best.y - y) ? p : best), placeNames[0])?.name ?? "Marka";
   const renderFeed = () => {
-    feedPanel.innerHTML = `<div class="bar"><strong>📱 ${GROUP_NAME}</strong><button data-feed="close">✕</button></div>
+    feedPanel.innerHTML = `<div class="bar"><strong>📱 ${region.names.group}</strong><button data-feed="close">✕</button></div>
       <div class="posts">${feedHtml(feed)}</div>`;
   };
   const showFeed = (open: boolean) => {
@@ -1547,8 +1533,9 @@ async function main() {
       post("moose", [Math.floor(mx), Math.floor(my)], {}, viewAlongTrack(mx, my, { kind: "moose", x: mx, y: my }));
       return;
     }
-    if (julehus.lights.visible && clock.day >= 7 && clock.day <= LIGHTS_DOWN_DAY && h >= 17 && h < 22 && since("julehus") > 24 * 10 && chance(0.15)) {
-      post("julehus", [JULEHUS.x, JULEHUS.y], {}, { camera: [JULEHUS.x + 1.5, JULEHUS.y + 2.1], target: [JULEHUS.x + 0.5, JULEHUS.y + 0.5], festive: [JULEHUS.x, JULEHUS.y] });
+    const house = region.christmasHouse;
+    if (house && clock.day >= 7 && clock.day <= LIGHTS_DOWN_DAY && h >= 17 && h < 22 && since("julehus") > 24 * 10 && chance(0.15)) {
+      post("julehus", [house.x, house.y], {}, { camera: [house.x + 1.5, house.y + 2.1], target: [house.x + 0.5, house.y + 0.5], festive: [house.x, house.y] });
       return;
     }
     const busy = kiosks.find((k) => k.kind === "stand" && k.soldToday >= 60);
@@ -2014,7 +2001,7 @@ async function main() {
         const next = g?.steering?.turn ? ` · neste kryss: til ${g.steering.turn < 0 ? "venstre" : "høyre"}` : "";
         status.textContent = g
           ? `${g.status} · ${((g.groomedTonight * map.tileSize) / 1000).toFixed(1).replace(".", ",")} km i natt${next}`
-          : whimsy.train?.stopped ? "Står på stasjonen" : "Gjøvikbanen, i fart";
+          : whimsy.train?.stopped ? "Står på stasjonen" : `${capital(region.names.railway)}, i fart`;
       }
     }
     drawAim();
@@ -2919,7 +2906,7 @@ async function main() {
     const traffic = tracks.traffic(x, y);
     askCrossing(
       {
-        title: obstacle === "rail" ? "Løypa krysser Gjøvikbanen" : `Løypa krysser ${road ?? "en vei"}`,
+        title: obstacle === "rail" ? `Løypa krysser ${region.names.railway}` : `Løypa krysser ${road ?? "en vei"}`,
         lead: obstacle !== "rail"
           ? roadTraffic(traffic).describe
           : tracks.levelCrossing(x, y)
@@ -3206,8 +3193,8 @@ async function main() {
             return `Krysser ${map.roadName(t.x, t.y) ?? "en vei"} — du velger hvordan underveis.`;
           }
           return tracks.levelCrossing(t.x, t.y)
-            ? "Krysser Gjøvikbanen på planovergangen — du velger underveis."
-            : `Krysser Gjøvikbanen: krever undergang til ${kr(crossingOptions("rail", 0)[0].price)}.`;
+            ? `Krysser ${region.names.railway} på planovergangen — du velger underveis.`
+            : `Krysser ${region.names.railway}: krever undergang til ${kr(crossingOptions("rail", 0)[0].price)}.`;
         });
       lines.push(...new Set(named));
       const reached = [...new Set(fresh.flatMap((t) => crowd.headsAt(t.x, t.y)).filter((h) => !h.entry && h.kind !== "homes"))];
@@ -3495,10 +3482,10 @@ async function main() {
         openLift(lift.name);
         return;
       }
-      if (julehus.lights.visible && julehus.near(lx, ly)) {
+      if (julehus.near(lx, ly)) {
         showToast(clock.day <= LIGHTS_DOWN_DAY
-          ? "🎄 <strong>Julehuset i Hadelandsveien</strong> – et lokalt landemerke. Tusenvis av lys, reinsdyr på plenen, og fast plass i Varingen hver desember. Best etter mørkets frembrudd."
-          : "🎄 <strong>Julehuset i Hadelandsveien</strong> – lysene ble tatt ned på tjugendedag. Kom tilbake i desember.");
+          ? `🎄 <strong>Julehuset i ${region.christmasHouse?.street}</strong> – et lokalt landemerke. Tusenvis av lys, reinsdyr på plenen, og fast plass i ${region.names.newspaper} hver desember. Best etter mørkets frembrudd.`
+          : `🎄 <strong>Julehuset i ${region.christmasHouse?.street}</strong> – lysene ble tatt ned på tjugendedag. Kom tilbake i desember.`);
         return;
       }
     }

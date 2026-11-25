@@ -1,3 +1,4 @@
+import { region } from "./region";
 import { dayLabel, seasonName } from "./clock";
 import { MEMBERSHIP_FEE } from "./skiers";
 import { AccountRow } from "./savegame";
@@ -145,7 +146,7 @@ export function seasonEdition(s: SeasonSummary, number: number): Edition {
         ? "Takk for vinteren!"
         : "En vinter å glemme";
   const tone = v === "great" ? 1 : v === "poor" ? -1 : 0;
-  const ingress = `Snøen har gitt opp, og løypene er stengt for sesongen ${seasonName(s.year)}. ${n0(s.skiers)} skiturer, ${km1(s.km)} km løype og ${pct(s.happy)} fornøyde skiløpere: Varingen gjør opp status.`;
+  const ingress = `Snøen har gitt opp, og løypene er stengt for sesongen ${seasonName(s.year)}. ${n0(s.skiers)} skiturer, ${km1(s.km)} km løype og ${pct(s.happy)} fornøyde skiløpere: ${region.names.newspaper} gjør opp status.`;
   const leader = {
     great: "– Folk har stoppet meg på butikken for å takke. Det har aldri skjedd før, sier løypelagets leder.",
     fine: "– Det har vært en grei vinter. Vi har lært mye, og vi har kjøpt mye diesel, sier løypelagets leder.",
@@ -184,7 +185,7 @@ export function seasonEdition(s: SeasonSummary, number: number): Edition {
   const letter = pick(letters, seed);
   const html = `
     <div class="masthead">
-      <div class="title">Varingen</div>
+      <div class="title">${region.names.newspaper}</div>
       <div class="dateline"><span>Nr. ${number} · Sesongavslutning</span><span>${end}</span><span>Løssalg 45 kr</span></div>
     </div>
     <article class="lead tone${tone}">
@@ -245,7 +246,7 @@ export function meetingHtml(s: SeasonSummary): string {
       <li>Løypenettet er på ${km1(s.km)} km${s.number > 1 && s.km > s.kmStart + 0.05 ? `, ${km1(s.km - s.kmStart)} km mer enn i fjor` : ""}.</li>
       <li>${n0(s.skiers)} skiturer i sesongen, og ${pct(s.happy)} av skiløperne var fornøyde.</li>
       <li>Laget har ${n0(s.members)} medlemmer${s.number > 1 ? `, ${n0(s.newMembers)} av dem nye i år` : ""}.</li>
-      ${s.chairlift ? "<li>Stolheisen i Varingskollen har tatt langrennsløperne til topps.</li>" : ""}
+      ${s.chairlift ? `<li>Stolheisen i ${region.names.skiArea} har tatt langrennsløperne til topps.</li>` : ""}
       ${s.kiosks + s.cabins > 0 ? `<li>Laget driver ${s.kiosks + s.cabins} vaffelsteder og hytter.</li>` : ""}
     </ul>
     <h4>2. Regnskap</h4>
@@ -294,18 +295,18 @@ export function settleSummer(s: SeasonSummary, groomers: number): Summer {
   };
 }
 
-const SUMMER_NOTES = [
+const summerNotes = () => [
   "Gunnar har overhalt løypemaskina og påstår at den går bedre enn ny.",
   "Bringebærkratt og bjørkeris har grodd inn over traseene. Ryddesaga har gått varm.",
   "En elgku med kalv har tatt i bruk skiløypa som sommerbeite.",
   "Styret har hatt tre møter og spist fem kaker. Ingen vedtak ble gjort.",
-  "Noen har syklet stisykkel i skiløypa og laget hjulspor. Varingen har skrevet om det.",
+  `Noen har syklet stisykkel i skiløypa og laget hjulspor. ${region.names.newspaper} har skrevet om det.`,
   "Vaffeljernet har vært på service. Det var ingenting galt med det, men det var hyggelig å få det sjekket.",
 ];
 
 export function summerHtml(s: SeasonSummary, summer: Summer, nextYear: number): string {
   const seed = s.year * 7 + 3;
-  const notes = [pick(SUMMER_NOTES, seed), pick(SUMMER_NOTES, seed + 1)].filter((t, i, a) => a.indexOf(t) === i);
+  const notes = [pick(summerNotes(), seed), pick(summerNotes(), seed + 1)].filter((t, i, a) => a.indexOf(t) === i);
   const row = (label: string, value: number) => `<tr><td>${label}</td><td class="${value >= 0 ? "plus" : "minus"}">${value >= 0 ? "+" : "−"}${kr(Math.abs(value))}</td></tr>`;
   return `
     <div class="head"><strong>☀️ Sommer i Hakadal</strong></div>

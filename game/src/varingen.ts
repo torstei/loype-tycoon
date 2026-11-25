@@ -1,3 +1,4 @@
+import { capital, region } from "./region";
 import { dayLabel } from "./clock";
 import { SurveyTally } from "./skiers";
 import { Weather } from "./weather";
@@ -64,7 +65,7 @@ export interface EditionInput {
   ploughing?: { roads: string[]; lost: string[] };
 }
 
-/** Varingen comes out on Thursdays. */
+/** The paper comes out on Thursdays. */
 export const PUBLISH_WEEKDAY = "tor";
 export const PUBLISH_HOUR = 8;
 
@@ -168,7 +169,7 @@ function stories(input: EditionInput): Story[] {
       body: [
         `– Jeg har kjørt denne veien i tretti år. Aldri har jeg måttet vente på en løypemaskin, sier vogntogsjåfør ${person(seed + 5, ["Gran", "Lunner", "Jaren", "Gjøvik"])}.`,
         "En kilde i veisektoren mener en kulvert eller bru ville løst saken. – Men det koster jo penger, og det har ikke løypelag, sier kilden.",
-        "Løypemaskinen har ikke svart på Varingens henvendelser.",
+        `Løypemaskinen har ikke svart på henvendelser fra ${region.names.newspaper}.`,
       ],
     });
   }
@@ -177,9 +178,9 @@ function stories(input: EditionInput): Story[] {
     out.push({
       score: 9,
       tone: -1,
-      kicker: "Varingen sjekker",
+      kicker: `${region.names.newspaper} sjekker`,
       headline: "«Strålende forhold»? Skiløperne er uenige",
-      lead: `Føremeldingen lovet perfekte spor ${lied.length === 1 ? "én dag" : `${lied.length} dager`} denne uka. Varingen har sammenlignet med virkeligheten. Det var ikke pent.`,
+      lead: `Føremeldingen lovet perfekte spor ${lied.length === 1 ? "én dag" : `${lied.length} dager`} denne uka. ${region.names.newspaper} har sammenlignet med virkeligheten. Det var ikke pent.`,
       body: [
         `– Det sto «lynraskt». Det betydde is, sier ${person(seed + 7, SOUTH)}, som hadde tatt turen nordover for første gang denne vinteren.`,
         "Løypelaget avviser at føremeldingen var pyntet. – Vi skrev det vi følte, sier en talsperson.",
@@ -213,7 +214,7 @@ function stories(input: EditionInput): Story[] {
         : `Regn og kulde har gjort sporet til en skøytebane. Skiløperne har delt seg i to grupper: de som falt, og de som ikke har prøvd ennå.`,
       body: [
         `– Jeg smurte med skareklister og bønn, sier ${person(seed + 11, SOUTH)}.`,
-        bare ? "Løypelaget håper på kaldere vær og mer snø. Det gjør Varingen også." : "Løypelaget anbefaler en tur med løypemaskinen før det fryser på igjen.",
+        bare ? `Løypelaget håper på kaldere vær og mer snø. Det gjør ${region.names.newspaper} også.` : "Løypelaget anbefaler en tur med løypemaskinen før det fryser på igjen.",
       ],
     });
   }
@@ -242,7 +243,7 @@ function stories(input: EditionInput): Story[] {
       lead: "Skiløperne er strålende fornøyde med løypene denne uka, og det sier de høyt.",
       body: [
         `– Beste sporet i hele Akershus. Og det sier jeg som er fra ${pick(SOUTH, seed + 15)}, sier ${pick(FIRST, seed + 16)} ${pick(LAST, seed + 17)}.`,
-        "Varingen har forsøkt å finne noen som er misfornøyd. Det lyktes ikke.",
+        `${region.names.newspaper} har forsøkt å finne noen som er misfornøyd. Det lyktes ikke.`,
       ],
     });
   }
@@ -340,36 +341,37 @@ function stories(input: EditionInput): Story[] {
       body: [],
     });
   }
-  if (day >= 7 && day <= 13) {
+  const street = region.christmasHouse?.street;
+  if (street && day >= 7 && day <= 13) {
     out.push({
       score: 8,
       tone: 1,
       kicker: "Julestemning",
-      headline: "Julehuset i Hadelandsveien har tent lysene",
-      lead: "Også i år lyser det i Hadelandsveien. Taket, hagen, grantreet og et reinsdyr på plenen: alt blinker.",
+      headline: `Julehuset i ${street} har tent lysene`,
+      lead: `Også i år lyser det i ${street}. Taket, hagen, grantreet og et reinsdyr på plenen: alt blinker.`,
       body: [
         `– Vi kjører forbi hver kveld bare for å se. Ungene nekter å legge seg før vi har vært der, sier ${person(seed + 51, NORTH)}.`,
         "– Hvor mange lys? Jeg har sluttet å telle, sier huseieren beskjedent. – Strømregningen teller for meg.",
       ],
     });
   }
-  if (day >= 14 && day <= 20) {
+  if (street && day >= 14 && day <= 20) {
     out.push({
       score: 4,
       tone: 0,
       kicker: "Trafikk",
       headline: "Saktekjøring forbi julehuset",
-      lead: "Bilistene på riksvei 4 sakker ned i Hadelandsveien for å se på julelysene. Politiet ber folk heller stoppe på en lomme.",
+      lead: `Bilistene sakker ned i ${street} for å se på julelysene. Politiet ber folk heller stoppe på en lomme.`,
       body: [],
     });
   }
-  if (day > 43 && day <= 50) {
+  if (street && day > 43 && day <= 50) {
     out.push({
       score: 3,
       tone: 0,
       kicker: "Tjugendedag",
-      headline: "Mørkt i Hadelandsveien",
-      lead: "Tjugendedag knut jager jula ut: julelysene i Hadelandsveien er tatt ned for i år. Reinsdyret er satt på låven.",
+      headline: `Mørkt i ${street}`,
+      lead: `Tjugendedag knut jager jula ut: julelysene i ${street} er tatt ned for i år. Reinsdyret er satt på låven.`,
       body: [],
     });
   }
@@ -379,7 +381,7 @@ function stories(input: EditionInput): Story[] {
       score: 9,
       tone: 1,
       kicker: "Endelig",
-      headline: "Stolheis i Varingskollen!",
+      headline: `Stolheis i ${region.names.skiArea}!`,
       lead: `Etter år med prat går det stoler opp ${chairlift}. Løypelaget har spleiset, og nå tar langrennsfolk også heisen til topps.`,
       body: [
         `– Jeg har stått i T-krok i førti år. Nå sitter jeg. Det føles nesten som juks, sier ${person(seed + 41, NORTH)}.`,
@@ -393,7 +395,7 @@ function stories(input: EditionInput): Story[] {
       tone: 1,
       kicker: "Samarbeid",
       headline: "Skytterlaget treffer blink med vaflene",
-      lead: "Løypelaget har inngått avtale med Nittedal Skytterlag: i helgene er det skytterne som står ved vaffeljernet.",
+      lead: `Løypelaget har inngått avtale med ${region.names.waffleClub}: i helgene er det skytterne som står ved vaffeljernet.`,
       body: [
         `– Det handler om konsentrasjon, pust og presis dosering av røra, sier en av skytterlagets vaffelsteikere. – Akkurat som på standplass.`,
         `– De beste vaflene jeg har smakt. Og jeg har smakt mange, sier ${person(seed + 27, NORTH)}.`,
@@ -512,10 +514,10 @@ const LETTERS: { from: string; text: string; reply?: string }[] = [
   { from: "Fornøyd, Skansen", text: "Takk til gutta og jentene i løypemaskina. Dere er natteravner i ordets beste forstand." },
 ];
 
-const RAIL = [
-  "Signalfeil på Gjøvikbanen – igjen. Jernbanen beklager, som vanlig.",
-  "Toget til Hakadal var i rute tirsdag. Varingen har dobbeltsjekket.",
-  "Signalfeil på Gjøvikbanen. Skiløpere med toget anbefales å smøre med tålmodighet.",
+const railNews = () => [
+  `Signalfeil på ${region.names.railway} – igjen. Jernbanen beklager, som vanlig.`,
+  `Toget til ${region.title} var i rute tirsdag. ${region.names.newspaper} har dobbeltsjekket.`,
+  `Signalfeil på ${region.names.railway}. Skiløpere med toget anbefales å smøre med tålmodighet.`,
 ];
 
 const fmt = (n: number) => n.toFixed(0);
@@ -554,8 +556,8 @@ function surveyBox(survey: SurveyTally[]): string {
     const quote = SURVEY_QUOTES[weak ? weak[0] : "praise"][i];
     return `<div class="row"><span class="who">${label}</span><span class="bar"><span style="width:${share}%"></span></span><span class="pct">${share} %</span><p class="quote">«${quote}»</p></div>`;
   }).join("");
-  return `<article class="survey"><div class="kicker">Varingen spør</div><h3>Hvor fornøyd er du med løypene?</h3>${rows}
-    <p class="method">Varingen spurte ${asked.toLocaleString("nb-NO")} skiløpere ved parkeringen. Hvor fornøyd de var med turen, i snitt.</p></article>`;
+  return `<article class="survey"><div class="kicker">${region.names.newspaper} spør</div><h3>Hvor fornøyd er du med løypene?</h3>${rows}
+    <p class="method">${region.names.newspaper} spurte ${asked.toLocaleString("nb-NO")} skiløpere ved parkeringen. Hvor fornøyd de var med turen, i snitt.</p></article>`;
 }
 
 /** Write the week's paper: the biggest story on the front, a few briefs, and the regular columns. */
@@ -566,14 +568,14 @@ export function writeEdition(input: EditionInput): Edition {
   const briefs = rest.filter((s) => s.score > 1).slice(0, 3);
   const letter = pick(LETTERS, seed + 3);
   const south = pick(FROM_THE_SOUTH, seed + 5);
-  const rail = rand(seed + 9) < 0.45 ? pick(RAIL, seed + 11) : null;
+  const rail = region.railwayOnMap && rand(seed + 9) < 0.45 ? pick(railNews(), seed + 11) : null;
   const hakadal = weather.snowDepthAt(input.lowest);
   // Rotnes is off the map, lower down and further south: always less snow than Hakadal.
   const rotnes = Math.max(0, weather.snowDepthAt(input.lowest - 30) * 0.6 - 4);
 
   const html = `
     <div class="masthead">
-      <div class="title">Varingen</div>
+      <div class="title">${region.names.newspaper}</div>
       <div class="dateline"><span>Nr. ${number}</span><span>${dayLabel(day)}</span><span>Løssalg 45 kr</span></div>
     </div>
     <article class="lead tone${lead.tone}">
@@ -586,7 +588,7 @@ export function writeEdition(input: EditionInput): Edition {
     <div class="columns">
       ${briefs.map((s) => `<article class="brief"><div class="kicker">${s.kicker}</div><h3>${s.headline}</h3><p>${s.lead}</p></article>`).join("")}
       <article class="brief south"><div class="kicker">Sør i bygda</div><p>${south}</p></article>
-      ${rail ? `<article class="brief"><div class="kicker">Gjøvikbanen</div><p>${rail}</p></article>` : ""}
+      ${rail ? `<article class="brief"><div class="kicker">${capital(region.names.railway)}</div><p>${rail}</p></article>` : ""}
       <article class="brief snow"><div class="kicker">Snømåling</div>
         <p>Hakadal: <strong>${fmt(hakadal)} cm</strong><br>Rotnes: <strong>${fmt(rotnes)} cm</strong>${rotnes < 3 ? " (og en kjegle)" : ""}</p></article>
     </div>

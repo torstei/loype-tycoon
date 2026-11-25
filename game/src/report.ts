@@ -1,3 +1,4 @@
+import { region } from "./region";
 import { dayLabel } from "./clock";
 import { GameMap } from "./map";
 import { DayStats } from "./skiers";
@@ -212,7 +213,7 @@ export function writeReport(input: ReportInput): Report {
   const signOff = pick(SIGN_OFFS, day);
   const facebook = comments(input);
   const facebookBlock = facebook.length
-    ? `<div class="facebook"><div class="fbhead">Fra gruppa «Skiføre i Hakadal (uoffisiell)»</div>${facebook.join("")}</div>`
+    ? `<div class="facebook"><div class="fbhead">Fra gruppa «${region.names.unofficialGroup}»</div>${facebook.join("")}</div>`
     : "";
 
   const row = (a: (typeof areaRows)[number], rosy: boolean) =>

@@ -1,7 +1,6 @@
+import { capital, region } from "./region";
 import { dayLabel } from "./clock";
 
-/** The local group where skiers and the snowcat driver post about the tracks. */
-export const GROUP_NAME = "Preppestatus Hakadal og omegn";
 
 export type PostKind = "groomed" | "perfect" | "icy" | "snowed" | "moose" | "julehus" | "waffles" | "chairlift" | "ploughed" | "snapshot" | "skiershot" | "trainshot" | "offtopic";
 
@@ -85,8 +84,8 @@ const TEXTS: Record<PostKind, Writer[]> = {
     (c) => `Elg i løypa ved ${c.place}! Han så ikke ut til å bry seg om oss.`,
   ],
   julehus: [
-    () => "Kjørte en omvei hjem for å se julehuset i Hadelandsveien. Ungene var helt stille i fem minutter 🎄✨",
-    () => "Julehuset i Hadelandsveien er tent! Det må være Norges største strømregning 😄🎄",
+    () => `Kjørte en omvei hjem for å se julehuset i ${region.christmasHouse?.street}. Ungene var helt stille i fem minutter 🎄✨`,
+    () => `Julehuset i ${region.christmasHouse?.street} er tent! Det må være Norges største strømregning 😄🎄`,
   ],
   waffles: [
     (c) => `Kø ved vaffelbua ved ${c.place}! ${c.waffles ? `${c.waffles} vafler solgt i dag, sa de.` : ""} Verdt hvert minutt 🧇`,
@@ -115,7 +114,7 @@ const TEXTS: Record<PostKind, Writer[]> = {
   ],
   trainshot: [
     (c) => `Utsikt fra førerhuset ved ${c.place} i dag. Dere som sitter bakerst går glipp av mye 🚆`,
-    (c) => `Gjøvikbanen ved ${c.place}. Norges beste kontor.`,
+    (c) => `${capital(region.names.railway)} ved ${c.place}. Norges beste kontor.`,
     (c) => `Sånn ser sporet ut fra toget ved ${c.place}. Skiløperne vinker, og jeg tuter tilbake.`,
   ],
   offtopic: [
