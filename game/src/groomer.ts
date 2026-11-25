@@ -15,11 +15,22 @@ const LOOK_AHEAD = 3;
 /** Tiles over which the gaze settles on a new direction. */
 const GAZE_TILES = 1;
 
-export const GARAGE_WITH_MACHINE_COST = 80_000;
+export const GARAGE_COST = 30_000;
+export const SNOWCAT_COST = 50_000;
+/** Machines a garage has room for. */
+export const MACHINES_PER_GARAGE = 2;
+/** Tiles around another machine's goal that a machine leaves to it. */
+const CLAIM_RADIUS = 4;
 /** How close, in tiles, track must come for a garage's machine to drive onto it. */
 export const GARAGE_REACH = 2;
 
-const NAMES = ["Gamle Gunnar", "Snøfrid", "Tråkk-Trine", "Diesel-Dagfinn", "Kari Kjetting", "Preppe-Per"];
+const NAMES = ["Gamle Gunnar", "Snøfrid", "Tråkk-Trine", "Diesel-Dagfinn", "Kari Kjetting", "Preppe-Per", "Belte-Berit", "Fres-Frode", "Spor-Sigrid", "Brøyte-Bjarne"];
+
+/** A name for the machine bought as number `n`, counting from 0: the list round again with "II", "III" and so on. */
+const machineName = (n: number) => {
+  const round = Math.floor(n / NAMES.length);
+  return round === 0 ? NAMES[n] : `${NAMES[n % NAMES.length]} ${"I".repeat(round + 1).replace("IIII", "IV")}`;
+};
 
 export type Schedule = "night" | "always";
 
@@ -241,6 +252,8 @@ export class Groomer {
     readonly name: string,
     readonly garage: Garage,
     colour: number,
+    /** The whole fleet, this machine included, so it leaves to the others the track they are heading for. */
+    private readonly fleet: readonly Groomer[] = [],
   ) {
     this.sprite = new SnowcatSprite(colour);
     this.px = garage.x + 0.6;
@@ -563,12 +576,22 @@ export class Groomer {
     return null;
   }
 
+  /** Where the machine is heading while it works, or null. */
+  get goal(): [number, number] | null {
+    return this.state === "grooming" && this.path.length > 0 ? this.path[this.path.length - 1] : null;
+  }
+
   private findWork(tracks: TrackNetwork, weather: Weather, now: number): [number, number][] | null {
     const here = this.tile;
     if (tracks.has(...here) && tracks.needsGrooming(...here, weather, now)) {
       return [here];
     }
-    return this.pathTo(tracks, (x, y) => tracks.needsGrooming(x, y, weather, now));
+    const claimed = this.fleet.filter((g) => g !== this).map((g) => g.goal).filter((t): t is [number, number] => t !== null);
+    const free = (x: number, y: number) => claimed.every(([cx, cy]) => Math.max(Math.abs(cx - x), Math.abs(cy - y)) > CLAIM_RADIUS);
+    return (
+      this.pathTo(tracks, (x, y) => tracks.needsGrooming(x, y, weather, now) && free(x, y)) ??
+      this.pathTo(tracks, (x, y) => tracks.needsGrooming(x, y, weather, now))
+    );
   }
 
   private headHome(tracks: TrackNetwork) {
@@ -627,7 +650,7 @@ export class Fleet {
 
   get nextGarageCost(): number {
     // The club already owns Gamle Gunnar; it only needs somewhere to keep him.
-    return this.garages.length === 0 ? 0 : GARAGE_WITH_MACHINE_COST;
+    return this.garages.length === 0 ? 0 : GARAGE_COST;
   }
 
   canPlace(x: number, y: number, tracks: TrackNetwork): boolean {
@@ -639,12 +662,25 @@ export class Fleet {
     );
   }
 
-  place(x: number, y: number): Groomer {
+  addGarage(x: number, y: number): Garage {
     const garage = new Garage(x, y);
     this.garages.push(garage);
     this.garageLayer.addChild(garage.sprite);
+    return garage;
+  }
+
+  machinesAt(garage: Garage): Groomer[] {
+    return this.groomers.filter((g) => g.garage === garage);
+  }
+
+  hasRoom(garage: Garage): boolean {
+    return this.machinesAt(garage).length < MACHINES_PER_GARAGE;
+  }
+
+  /** A new machine, kept in `garage`. */
+  addMachine(garage: Garage): Groomer {
     const n = this.groomers.length;
-    const groomer = new Groomer(NAMES[n % NAMES.length], garage, COLOURS[n % COLOURS.length]);
+    const groomer = new Groomer(machineName(n), garage, COLOURS[n % COLOURS.length], this.groomers);
     this.groomers.push(groomer);
     this.machineLayer.addChild(groomer.sprite.root);
     return groomer;

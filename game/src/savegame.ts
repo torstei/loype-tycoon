@@ -51,8 +51,13 @@ export interface SaveGame {
   rainSinceReport: number;
   weather: { snowDepth: number; highDepth?: number; plans: DayPlan[] };
   tracks: TrackRecord[];
-  /** onCall is absent in saves from before machines could be kept in the garage. */
-  garages: { tile: GridTile; totalGroomed: number; onCall?: boolean }[];
+  /**
+   * Saves from before machines were bought on their own have a machine in every garage, kept here
+   * with the garage: totalGroomed and, from when machines could wait in the garage, onCall.
+   */
+  garages: { tile: GridTile; totalGroomed?: number; onCall?: boolean }[];
+  /** Each machine and the index of its garage; absent in saves from before machines were bought on their own. */
+  machines?: { garage: number; totalGroomed: number; onCall: boolean }[];
   schedule: "night" | "always";
   reports: SavedReport[];
   crew: GridTile;

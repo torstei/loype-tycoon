@@ -39,6 +39,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #fleet[hidden] { display: none; }
 #fleet .head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
 #fleet .head button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid #9aa8b2; background: #fff; border-radius: 4px; cursor: pointer; }
+#fleet .tabs { display: flex; gap: 4px; }
+#fleet .head button.tab { font-weight: 600; border-radius: 6px 6px 0 0; border-bottom-color: transparent; background: #eef2f6; color: #4a5a68; }
+#fleet .head button.tab.on { background: #fff; color: #1d2b36; border-color: #5c7080; border-bottom-color: transparent; }
+#fleet .head button.fold { margin-left: auto; padding: 2px 7px; border: none; font-size: 15px; }
+#fleet .head #schedule { margin-left: auto; }
+#fleet .head #schedule + button.fold { margin-left: 0; }
+#fleet .list { max-height: min(40vh, 320px); overflow-y: auto; border-top: 1px solid #c8d2da; padding-top: 4px; }
+#fleet .none { color: #7a8690; font-style: italic; }
 #fleet .row { padding: 2px 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 #fleet .buttons { margin-left: auto; display: flex; gap: 4px; }
 #fleet button.mode, #fleet button.drive { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid #9aa8b2;
@@ -170,6 +178,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
   max-height: calc(100vh - 140px); overflow-y: auto; padding: 12px 16px; background: #fffaf0; border: 3px solid #8a5a30;
   border-radius: 10px; z-index: 8; box-shadow: 0 12px 40px rgba(10, 20, 40, 0.4); font-size: 14px; }
 #kiosk[hidden], #lift[hidden], #season[hidden] { display: none; }
+#kiosk h3 { margin: 12px 0 2px; font-size: 15px; color: #5a3a20; }
 #kiosk .head, #lift .head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
 #kiosk .head button, #lift .head button { font: inherit; border: none; background: none; font-size: 18px; cursor: pointer; }
 #kiosk .status, #lift .status { margin: 6px 0 8px; color: #5a3a20; }
