@@ -11,7 +11,7 @@ const MAX_CHUNKS = 40;
  */
 export class LandscapeChunks {
   readonly layer = new Container();
-  private readonly fields: LandscapeFields;
+  readonly fields: LandscapeFields;
   private readonly chunks = new Map<string, { sprite: Sprite; used: number }>();
   private frame = 0;
   private readonly cols: number;

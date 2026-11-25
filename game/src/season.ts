@@ -203,7 +203,7 @@ export function seasonEdition(s: SeasonSummary, number: number): Edition {
       <article class="brief snow"><div class="kicker">Snømåling</div><p>Hakadal: <strong>0 cm</strong><br>Rotnes: <strong>hestehov</strong></p></article>
     </div>
     <article class="letter"><div class="kicker">Leserbrev</div><p>«${letter.text}»</p><p class="from">— ${letter.from}</p></article>
-    <p class="next"><button data-open="meeting">Til årsmøtet →</button></p>`;
+    <p class="next"><button data-open="album">Sesongen i bilder →</button></p>`;
   return { day: s.endDay, number, headline, tone, html };
 }
 

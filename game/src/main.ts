@@ -39,6 +39,7 @@ import { Alpine, CHAIRLIFT_PRICE } from "./alpine";
 import { GroundShot, groundPhoto, sunDirection } from "./groundphoto";
 import { nightLights, streetLamps } from "./lights";
 import { Julehus, JULEHUS, LIGHTS_DOWN_DAY } from "./christmas";
+import { AlbumPhoto, albumHtml, keepInAlbum, seasonMap } from "./album";
 import { feedHtml, GROUP_NAME, Post, PostKind, writePost } from "./feed";
 import { findRoute, RouteGround } from "./route";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, MIN_GROOMING_DEPTH, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
@@ -156,7 +157,8 @@ async function main() {
   app.stage.addChild(world);
 
   await new Promise((r) => requestAnimationFrame(r));
-  const overview = new Sprite(Texture.from(renderOverview(map)));
+  const overviewCanvas = renderOverview(map);
+  const overview = new Sprite(Texture.from(overviewCanvas));
   overview.scale.set(PX / OVERVIEW_PX);
   const chunks = new LandscapeChunks(map);
   const detail = chunks.layer;
@@ -275,7 +277,7 @@ async function main() {
   if (new URLSearchParams(location.search).has("debug")) {
     Object.assign(window, { loype: { map, world, camera, whimsy, alpine, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks,
       fastForward: (hours: number, step?: number) => fastForward(hours, step), history: () => history,
-      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition(), photo: (x: number, y: number) => takePhoto(x, y), groundShot: (view: View) => groundShot(view), viewAlongTrack: (x: number, y: number, subject?: View["subject"]) => viewAlongTrack(x, y, subject), viewDownLift: () => viewDownLift(), viewIntoSun: (x: number, y: number, subject?: View["subject"]) => viewIntoSun(x, y, subject), post: (kind: PostKind, x?: number, y?: number) => post(kind, x === undefined ? null : [x, y!]), feed: () => feed } });
+      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition(), photo: (x: number, y: number) => takePhoto(x, y), groundShot: (view: View) => groundShot(view), viewAlongTrack: (x: number, y: number, subject?: View["subject"]) => viewAlongTrack(x, y, subject), viewDownLift: () => viewDownLift(), viewIntoSun: (x: number, y: number, subject?: View["subject"]) => viewIntoSun(x, y, subject), post: (kind: PostKind, x?: number, y?: number, view?: View | null) => post(kind, x === undefined ? null : [x, y!], {}, view ?? null), feed: () => feed } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -1091,6 +1093,7 @@ async function main() {
     past: [] as SeasonSummary[],
     ended: undefined as SeasonSummary | undefined,
     summer: undefined as Summer | undefined,
+    album: [] as AlbumPhoto[],
   };
   let editionIndex = -1;
   const paperPanel = document.getElementById("paper")!;
@@ -1224,15 +1227,15 @@ async function main() {
     if (toggleAutoOpen(e)) {
       return;
     }
-    if ((e.target as HTMLElement).closest("[data-open='meeting']")) {
-      showSeason("meeting");
+    if ((e.target as HTMLElement).closest("[data-open='album']")) {
+      showSeason("album");
       return;
     }
     const action = (e.target as HTMLElement).closest("button")?.dataset.p;
     if (action === "close") {
       showPaper(false);
       if (season.ended && seasonPanel.hidden) {
-        showSeason(season.summer ? "summer" : "meeting");
+        showSeason(season.summer ? "summer" : "album");
       }
       return;
     }
@@ -1365,6 +1368,9 @@ async function main() {
       waffles: extra.waffles,
     }, view ? groundShot(view) : at ? takePhoto(x, y) : null, Math.floor(clock.hours * 7.3) + feed.length);
     feed.push(p);
+    if (p.photo && at) {
+      season.album = keepInAlbum(season.album, { x: x + 0.5, y: y + 0.5, day: p.day, kind, author: p.author, text: p.text, likes: p.likes, photo: p.photo });
+    }
     feed.splice(0, Math.max(0, feed.length - FEED_KEPT));
     feed.slice(0, -FEED_PHOTOS).forEach((old) => (old.photo = null));
     lastPosted.set(kind, clock.hours);
@@ -1504,13 +1510,19 @@ async function main() {
     showToast("🏁 <strong>Sesongen er over!</strong> Snøen er borte fra løypene. Les sesongavisa, så er det årsmøte.", 12000);
   };
 
-  const showSeason = (step: "meeting" | "summer") => {
+  const showSeason = (step: "album" | "meeting" | "summer") => {
     const summary = season.ended!;
     if (step === "summer" && !season.summer) {
       season.summer = settleSummer(summary, fleet.groomers.length);
       autosave();
     }
-    seasonPanel.innerHTML = step === "meeting" ? meetingHtml(summary) : summerHtml(summary, season.summer!, summary.year + 1);
+    seasonPanel.innerHTML =
+      step === "album"
+        ? albumHtml(summary.year, season.album, seasonMap(map, overviewCanvas, chunks.fields, tracks, [startPoi.x, startPoi.y]))
+        : step === "meeting"
+          ? meetingHtml(summary)
+          : summerHtml(summary, season.summer!, summary.year + 1);
+    seasonPanel.classList.toggle("wide", step === "album");
     seasonPanel.hidden = false;
     seasonPanel.scrollTop = 0;
     showPaper(false);
@@ -1564,8 +1576,17 @@ async function main() {
   };
 
   seasonPanel.addEventListener("click", (e) => {
-    const step = (e.target as HTMLElement).closest("button")?.dataset.season;
-    if (step === "summer") {
+    const target = e.target as HTMLElement;
+    const thumb = target.closest<SVGElement>("[data-photo]");
+    const zoomed = target.closest<HTMLElement>("figure[data-zoom]");
+    if (thumb || zoomed) {
+      seasonPanel.querySelectorAll<HTMLElement>("figure[data-zoom]").forEach((f) => (f.hidden = !thumb || f.dataset.zoom !== thumb.dataset.photo));
+      return;
+    }
+    const step = target.closest("button")?.dataset.season;
+    if (step === "meeting") {
+      showSeason("meeting");
+    } else if (step === "summer") {
       showSeason("summer");
     } else if (step === "next") {
       startNextSeason();
@@ -3229,7 +3250,7 @@ async function main() {
     refreshForecast();
     if (season.ended) {
       clock.ended = true;
-      showSeason(season.summer ? "summer" : "meeting");
+      showSeason(season.summer ? "summer" : "album");
     }
     document.getElementById("setup")!.hidden = fleet.garages.length > 0;
     setTool(fleet.garages.length > 0 ? restingTool() : "garage");
