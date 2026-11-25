@@ -2,7 +2,7 @@ import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture } fr
 import { Camera, OVERVIEW_BELOW } from "./camera";
 import { dayLabel, EARLIEST_SEASON_END, FIRST_SEASON, GameClock, holiday, isWeekend, MAX_SEASON_DAYS, seasonName, setSeason, SPEEDS, weekday } from "./clock";
 import { meetingHtml, rating, seasonEdition, SeasonSummary, settleSummer, Summer, summarise, summerHtml } from "./season";
-import { COST_PER_TILE, Fleet, GARAGE_REACH, Groomer } from "./groomer";
+import { COST_PER_TILE, Fleet, Garage, GARAGE_REACH, Groomer, MACHINES_PER_GARAGE, SNOWCAT_COST } from "./groomer";
 import { accountsHtml, DayAccount } from "./accounts";
 import { areas, Report, writeReport } from "./report";
 import { CABIN_REACH, CABIN_TIERS, EXPERTS, Kiosk, KIOSK_TIERS, OutletKind } from "./kiosk";
@@ -147,6 +147,9 @@ const TOOL_NAMES: Record<Tool, string> = { look: "Se deg rundt", build: "Bygg l�
 /** Below this window width (or on a touch-only device) the tools move to a bar at the bottom. */
 const COMPACT_BELOW = 760;
 const BAR_HIDDEN = "loype-tycoon:bar-hidden";
+const FLEET_PANEL = "loype-tycoon:fleet-panel";
+/** The machines, or the waffle stands and cabins: they share the corner of the screen, one at a time. */
+type FleetTab = "machines" | "sales";
 const AUTO_OPEN = "loype-tycoon:auto-open:";
 /** On a phone the tile info goes away by itself, since there is no pointer leaving to hide it. */
 const COMPACT_INFO_MS = 5000;
@@ -504,6 +507,31 @@ async function main() {
 
   const topbar = document.getElementById("topbar")!;
   const fleetPanel = document.getElementById("fleet")!;
+  const fleetButton = document.getElementById("fleet-button")!;
+  let fleetTab: FleetTab = "machines";
+  let fleetOpen = false;
+  try {
+    const saved = JSON.parse(localStorage.getItem(FLEET_PANEL) ?? "{}");
+    fleetTab = saved.tab === "sales" ? "sales" : "machines";
+    fleetOpen = saved.open === true;
+  } catch {
+    // Starts closed, on the machines.
+  }
+  const rememberFleetPanel = () => {
+    try {
+      localStorage.setItem(FLEET_PANEL, JSON.stringify({ tab: fleetTab, open: fleetOpen }));
+    } catch {
+      // Not remembered between visits; no harm done.
+    }
+  };
+  /** Open or close the list of machines and places that sell, on a tab when given. */
+  const showFleet = (open: boolean, tab?: FleetTab) => {
+    fleetOpen = open;
+    fleetTab = tab ?? fleetTab;
+    rememberFleetPanel();
+    refreshHud();
+  };
+  fleetButton.addEventListener("click", () => showFleet(!fleetOpen));
   const pausedBanner = document.getElementById("paused")!;
   const toolMenu = document.getElementById("tool-menu")!;
   const toolMenuButton = document.getElementById("tool-menu-button")!;
@@ -594,6 +622,27 @@ async function main() {
   });
   const forecastPanel = document.getElementById("forecast")!;
 
+  /** The named place nearest a tile, for saying where something is. */
+  const nearestPlace = (x: number, y: number): string | null => {
+    let best: string | null = null;
+    let bestD = Infinity;
+    for (const p of map.pois) {
+      if (p.name && (p.kind === "place" || p.kind === "peak" || p.kind === "station")) {
+        const d = Math.hypot(p.x - x, p.y - y);
+        if (d < bestD) {
+          bestD = d;
+          best = p.name;
+        }
+      }
+    }
+    return best;
+  };
+  /** How a garage is told apart from the others: "ved Ekra", after the nearest named place. */
+  const garageName = (g: Garage) => {
+    const place = nearestPlace(g.x, g.y);
+    return place ? `ved ${place}` : `nr. ${fleet.garages.indexOf(g) + 1}`;
+  };
+
   const refreshHud = () => {
     const km = (tracks.size * map.tileSize) / 1000;
     const nowIcon = weather.precipRate > 0 ? (weather.temperature < 0.8 ? "🌨️" : "🌧️") : clock.daylight() > 0.5 ? "☀️" : "🌙";
@@ -632,27 +681,55 @@ async function main() {
     pausedBanner.hidden = !clock.paused || !timeStarted || asking || clock.seasonOver;
     const garageTool = document.querySelector<HTMLButtonElement>('[data-tool="garage"]')!;
     garageTool.title = `4 · ${fleet.nextGarageCost === 0 ? "gratis" : kr(fleet.nextGarageCost)}`;
-    fleetPanel.hidden = fleet.groomers.length === 0;
+    fleetButton.hidden = fleet.garages.length === 0;
+    fleetButton.classList.toggle("active", fleetOpen);
+    fleetPanel.hidden = !fleetOpen || fleet.garages.length === 0;
+    if (fleetPanel.hidden) {
+      fleetPanel.innerHTML = "";
+      return;
+    }
+    const stands = fleet.garages.flatMap((g, i) => {
+      const k = kioskAt(g.x, g.y);
+      return k ? [{ k, i, where: garageName(g) }] : [];
+    });
+    const cabins = kiosks.filter((k) => k.kind === "cabin");
+    const tab = (which: FleetTab, label: string) =>
+      `<button class="tab${fleetTab === which ? " on" : ""}" data-tab="${which}">${label}</button>`;
+    const machines = [...fleet.groomers.map((g, i) => {
+      const drive = g.state === "home"
+        ? `<button class="drive" data-drive="${i}" title="Send ${g.name} ut nå, uansett tid på døgnet">▶ Kjør ut</button>`
+        : g.state === "grooming" ? `<button class="drive" data-drive="${i}" title="Kall ${g.name} hjem og spar diesel">⏹ Hjem</button>` : "";
+      return `<div class="row"><span class="name" title="Står i garasjen ${garageName(g.garage)}">🚜 ${g.name}</span> ${g.status}
+        <span class="buttons">
+        <button class="mode${g.onCall ? " on" : ""}" data-oncall="${i}" title="${g.onCall ? `${g.name} står i garasjen til du sender den ut. Klikk for å la den kjøre selv.` : `${g.name} kjører selv når løypene trenger det. Klikk for å la den stå til du sender den ut.`}">${g.onCall ? "✋ På vent" : "🔁 Auto"}</button>
+        ${drive}
+        <button class="drive" data-wheel="${i}" title="Kjør ${g.name} selv, fra førerhytta">🕹</button>
+        <button class="goto" data-goto="${i}" title="Vis ${g.name} på kartet">Gå til</button></span></div>`;
+    }), `<div class="row none">Løypemaskiner kjøpes ved en garasje: klikk på den på kartet.</div>`];
+    const sales = [
+      ...stands.map(({ k, i, where }) => `<div class="row"><span class="name">🧇 ${k.spec.short}</span> ${where}${k.broken ? " · i ustand" : ""}
+          <span class="buttons"><button class="kiosk" data-kiosk="${i}">Åpne</button></span></div>`),
+      ...cabins.map((k) => `<div class="row"><span class="name">🛖 ${k.title}</span> ${k.spec.short}${k.spec.rooms ? ` · 🛏 ${k.guestsLastNight}` : ""}
+          <span class="buttons"><button class="kiosk" data-cabin="${k.x},${k.y}">Åpne</button></span></div>`),
+      `<div class="row none">Vaffelsalg startes ved en garasje: klikk på den på kartet.</div>`,
+    ];
     fleetPanel.innerHTML = `
-      <div class="head"><strong>Løypemaskiner</strong>
-        <button id="schedule">${fleet.schedule === "night" ? "🌙 Prepper om natta" : "🕑 Prepper døgnet rundt"}</button></div>
-      ${fleet.groomers.map((g, i) => {
-        const k = kioskAt(g.garage.x, g.garage.y);
-        const drive = g.state === "home"
-          ? `<button class="drive" data-drive="${i}" title="Send ${g.name} ut nå, uansett tid på døgnet">▶ Kjør ut</button>`
-          : g.state === "grooming" ? `<button class="drive" data-drive="${i}" title="Kall ${g.name} hjem og spar diesel">⏹ Hjem</button>` : "";
-        return `<div class="row"><span class="name">🚜 ${g.name}</span> ${g.status}
-          <span class="buttons">
-          <button class="mode${g.onCall ? " on" : ""}" data-oncall="${i}" title="${g.onCall ? `${g.name} står i garasjen til du sender den ut. Klikk for å la den kjøre selv.` : `${g.name} kjører selv når løypene trenger det. Klikk for å la den stå til du sender den ut.`}">${g.onCall ? "✋ På vent" : "🔁 Auto"}</button>
-          ${drive}
-          <button class="drive" data-wheel="${i}" title="Kjør ${g.name} selv, fra førerhytta">🕹</button>
-          <button class="goto" data-goto="${i}" title="Vis ${g.name} på kartet">Gå til</button>
-          <button class="kiosk" data-kiosk="${i}" title="Vaffelsalg ved garasjen">🧇 ${k ? `${k.spec.short}${k.broken ? " (i ustand)" : ""}` : "Vaffelsalg?"}</button></span></div>`;
-      }).join("")}
-      ${kiosks.filter((k) => k.kind === "cabin").map((k) => `<div class="row"><span class="name">🛖 ${k.title}</span> ${k.spec.short}${k.spec.rooms ? ` · 🛏 ${k.guestsLastNight}` : ""}
-          <button class="kiosk" data-cabin="${k.x},${k.y}">Åpne</button></div>`).join("")}`;
+      <div class="head">
+        <span class="tabs">${tab("machines", `🚜 Maskiner (${fleet.groomers.length})`)}${tab("sales", `🧇 Salg (${stands.length + cabins.length})`)}</span>
+        ${fleetTab === "machines" ? `<button id="schedule">${fleet.schedule === "night" ? "🌙 Om natta" : "🕑 Døgnet rundt"}</button>` : ""}
+        <button class="fold" data-close title="Lukk (L)">✕</button></div>
+      <div class="list">${(fleetTab === "machines" ? machines : sales).join("")}</div>`;
   };
   fleetPanel.addEventListener("pointerdown", (e) => {
+    const tabButton = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]");
+    if (tabButton) {
+      showFleet(true, tabButton.dataset.tab as FleetTab);
+      return;
+    }
+    if ((e.target as HTMLElement).closest("[data-close]")) {
+      showFleet(false);
+      return;
+    }
     const gotoButton = (e.target as HTMLElement).closest<HTMLElement>("[data-goto]");
     if (gotoButton) {
       goToGroomer(fleet.groomers[Number(gotoButton.dataset.goto)]);
@@ -841,17 +918,17 @@ async function main() {
       return null;
     }
     if (outletTarget.kind === "garage") {
-      const groomer = fleet.groomers[outletTarget.index];
-      if (!groomer) {
+      const garage = fleet.garages[outletTarget.index];
+      if (!garage) {
         return null;
       }
-      const { x, y } = groomer.garage;
-      return { x, y, kind: "stand" as const, current: kioskAt(x, y), tiers: KIOSK_TIERS.map((t, i) => [t, i] as const), title: `🧇 Vaffelsalg ved garasjen til ${groomer.name}` };
+      const { x, y } = garage;
+      return { x, y, kind: "stand" as const, garage, current: kioskAt(x, y), tiers: KIOSK_TIERS.map((t, i) => [t, i] as const), title: `🏠 Garasjen ${garageName(garage)}` };
     }
     const { x, y } = outletTarget;
     const current = cabinNear(x, y, 0);
     const offered = current?.tier === 0 ? [[CABIN_TIERS[0], 0] as const] : CABIN_TIERS.map((t, i) => [t, i] as const).filter(([t]) => t.price > 0);
-    return { x, y, kind: "cabin" as const, current, tiers: offered, title: current ? `🛖 ${current.title}` : "🛖 Ny hytte her" };
+    return { x, y, kind: "cabin" as const, garage: null, current, tiers: offered, title: current ? `🛖 ${current.title}` : "🛖 Ny hytte her" };
   };
 
   const renderKiosk = () => {
@@ -886,8 +963,18 @@ async function main() {
           : `<button data-buy="${i}" ${cost > budget ? "disabled" : ""}>${current ? "Oppgrader" : kind === "cabin" ? "Bygg" : "Kjøp"} ${kr(cost)}</button>`;
       return `<tr class="${current?.tier === i ? "current" : ""}"><td><strong>${t.name}</strong><br><small>${t.pitch}</small><br><small class="facts">${extras}</small></td><td>${action}</td></tr>`;
     }).join("");
+    const garage = target.garage;
+    const parked = garage ? fleet.machinesAt(garage) : [];
+    const machines = garage
+      ? `<h3>🚜 Løypemaskiner</h3>
+        <p class="status">${parked.length ? parked.map((g) => `<strong>${g.name}</strong>: ${g.status.toLowerCase()}`).join("<br>") : "Ingen løypemaskin her ennå. Garasjen kan brukes til vaffelsalg likevel."}</p>
+        <table><tr><td><strong>Ny løypemaskin</strong><br><small>Belter, fres og sporsetter. Diesel og fører betales per tur.</small><br><small class="facts">Plass til ${MACHINES_PER_GARAGE} i garasjen</small></td>
+          <td>${fleet.hasRoom(garage) ? `<button data-machine="buy" ${SNOWCAT_COST > budget ? "disabled" : ""}>Kjøp ${kr(SNOWCAT_COST)}</button>` : `<span class="owned">Garasjen er full</span>`}</td></tr></table>
+        <h3>🧇 Vaffelsalg</h3>`
+      : "";
     kioskPanel.innerHTML = `
       <div class="head"><strong>${target.title}</strong><button data-k="close">✕</button></div>
+      ${machines}
       <p class="status">${status}</p>
       <table>${rows}</table>
       ${current?.tier === 0 && kind === "cabin" ? "" : `<p class="note">Oppgradering koster mellomlegget: det dere har betalt, trekkes fra.</p>`}
@@ -915,6 +1002,14 @@ async function main() {
     }
     const target = resolveTarget();
     if (!target) {
+      return;
+    }
+    if (button.dataset.machine === "buy" && target.garage && fleet.hasRoom(target.garage) && SNOWCAT_COST <= budget) {
+      budget -= SNOWCAT_COST;
+      const groomer = fleet.addMachine(target.garage);
+      showToast(`🚜 <strong>${groomer.name}</strong> er levert til garasjen ${garageName(target.garage)}, med full tank.`);
+      renderKiosk();
+      refreshHud();
       return;
     }
     if (button.dataset.experts === "hire") {
@@ -955,22 +1050,6 @@ async function main() {
     renderKiosk();
     refreshHud();
   });
-
-  /** The named place nearest a tile, for saying where something is. */
-  const nearestPlace = (x: number, y: number): string | null => {
-    let best: string | null = null;
-    let bestD = Infinity;
-    for (const p of map.pois) {
-      if (p.name && (p.kind === "place" || p.kind === "peak" || p.kind === "station")) {
-        const d = Math.hypot(p.x - x, p.y - y);
-        if (d < bestD) {
-          bestD = d;
-          best = p.name;
-        }
-      }
-    }
-    return best;
-  };
 
   /** Why a cabin cannot go on a tile, or null if it can. */
   const cabinProblem = (x: number, y: number): string | null => {
@@ -2746,7 +2825,10 @@ async function main() {
     }
     const first = fleet.garages.length === 0;
     budget -= fleet.nextGarageCost;
-    fleet.place(x, y);
+    const garage = fleet.addGarage(x, y);
+    if (first) {
+      fleet.addMachine(garage);
+    }
     document.getElementById("setup")!.hidden = true;
     if (first) {
       crew.x = x;
@@ -2757,6 +2839,7 @@ async function main() {
         : "Bygg den første løypa ut fra garasjen — med musa, eller med T og tastene rundt S."} Tiden starter når den første løypa er lagt.`);
     } else {
       setTool(restingTool());
+      showToast(`🏠 Garasjen ${garageName(garage)} står klar. Klikk på den for å kjøpe en løypemaskin eller starte vaffelsalg.`);
     }
     redrawTracks();
     refreshHud();
@@ -3497,6 +3580,11 @@ async function main() {
         openLift(lift.name);
         return;
       }
+      const garage = fleet.garages.findIndex((g) => Math.max(Math.abs(g.x - lx), Math.abs(g.y - ly)) <= 1);
+      if (garage >= 0) {
+        openKiosk(garage);
+        return;
+      }
       if (julehus.near(lx, ly)) {
         showToast(clock.day <= LIGHTS_DOWN_DAY
           ? `🎄 <strong>Julehuset i ${region.christmasHouse?.street}</strong> – et lokalt landemerke. Tusenvis av lys, reinsdyr på plenen, og fast plass i ${region.names.newspaper} hver desember. Best etter mørkets frembrudd.`
@@ -3789,6 +3877,8 @@ async function main() {
       toggleSnow();
     } else if (e.code === "KeyG") {
       toggleGroomMap();
+    } else if (e.code === "KeyL") {
+      showFleet(!fleetOpen);
     } else if ((e.code === "Enter" || e.code === "NumpadEnter") && tool === "garage") {
       placeGarage(crew.x, crew.y);
     } else if (e.code === "KeyM") {
@@ -3809,6 +3899,7 @@ async function main() {
       kioskPanel.hidden = true;
       liftPanel.hidden = true;
       showFeed(false);
+      showFleet(false);
       closeMenus();
       clearPlan();
     } else {
@@ -3842,7 +3933,8 @@ async function main() {
     rainSinceReport,
     weather: { snowDepth: weather.snowDepth, highDepth: weather.highDepth, plans: weather.allPlans() },
     tracks: encodeTracks(map, tracks),
-    garages: fleet.groomers.map((g) => ({ tile: map.toGrid(g.garage.x, g.garage.y), totalGroomed: g.totalGroomed, onCall: g.onCall })),
+    garages: fleet.garages.map((g) => ({ tile: map.toGrid(g.x, g.y) })),
+    machines: fleet.groomers.map((g) => ({ garage: fleet.garages.indexOf(g.garage), totalGroomed: g.totalGroomed, onCall: g.onCall })),
     kiosks: kiosks.map((k) => ({ tile: map.toGrid(k.x, k.y), tier: k.tier, soldToday: k.soldToday, broken: k.broken, experts: k.experts, kind: k.kind, name: k.name })),
     schedule: fleet.schedule,
     reports: reports.map(({ report, rosy }) => ({ ...report, rosyChosen: rosy })),
@@ -3887,12 +3979,17 @@ async function main() {
     rainSinceReport = save.rainSinceReport;
     weather.restore(save.weather.plans, save.weather.snowDepth, clock.hours, save.weather.highDepth);
     const result = decodeTracks(map, tracks, save.tracks);
-    for (const g of save.garages) {
+    const garages = save.garages.map((g) => {
       const local = map.fromGrid(g.tile);
-      if (local) {
-        const groomer = fleet.place(...local);
-        groomer.totalGroomed = g.totalGroomed;
-        groomer.onCall = g.onCall ?? false;
+      return local ? fleet.addGarage(...local) : null;
+    });
+    const machines = save.machines ?? save.garages.map((g, i) => ({ garage: i, totalGroomed: g.totalGroomed ?? 0, onCall: g.onCall ?? false }));
+    for (const m of machines) {
+      const garage = garages[m.garage];
+      if (garage) {
+        const groomer = fleet.addMachine(garage);
+        groomer.totalGroomed = m.totalGroomed;
+        groomer.onCall = m.onCall;
       }
     }
     fleet.schedule = save.schedule;
