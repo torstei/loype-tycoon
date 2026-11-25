@@ -75,6 +75,15 @@ Controls (press `H` in the game for the full list):
   roads can be followed however steep the hillside beside them. Steep ground shows on the
   map: hillsides get harder light and shadow, ground over 25 % gets short strokes pointing
   downhill, and ground over 40 %, too steep for the snowcat, gets streaks down the fall line.
+- **Forest roads**: the gated gravel roads in the forest lie under snow in winter and make
+  ready-made track, at 50 kr a tile. The landowner ploughs some of them for logging, and which
+  ones changes from winter to winter, following its published brøytekart for 2023/24, 2024/25
+  and 2026/27 (a winter without one follows one of those). A ploughed forest road is a quiet
+  road to cross. When a new season ploughs a road the club had track along, that track is
+  gone and the season opens by saying so; short crossings over it become level crossings. The
+  winter's first Varingen covers the brøytekart, and now and then someone in the local group
+  who skied in along a forest road with the kids comes back to find it ploughed, and is not
+  pleased; the locals explain what the roads are for.
 - **Grooming**: tool `4` places another garage next to the track, with a new machine
   (80 000 kr). Machines go out when tracks need it (by default only at night),
   groom their way round the network and drive home. Diesel is paid per tile groomed.
@@ -300,6 +309,12 @@ fingerprint of its content) and `<name>-preview.png`.
 Terrain ids and flag bits are shared between `mapgen.py` and `game/src/terrain.ts`. Level
 crossings (flag bit 10) are found where a road or path meets the railway in OSM with neither
 on a bridge or in a tunnel.
+
+Forest roads are OSM `highway=track`, and `unclassified` or `service` roads with
+`access`/`motor_vehicle` set to private, forestry, agricultural or no. Which of them the
+landowner ploughs each winter is in `tools/mapgen/ploughed.json`, as OSM way ids per winter,
+read off the published brøytekart by fitting its red lines onto the OSM roads. The map carries
+those roads' tiles per winter in `ploughing`, and the game ploughs them when it loads a season.
 
 ## Phones and tablets
 

@@ -60,6 +60,8 @@ export interface EditionInput {
   lowest: number;
   /** What each kind of skier thought since the last edition. */
   survey: SurveyTally[];
+  /** In the winter's first edition: the forest roads ploughed this winter, and those the club lost track along. */
+  ploughing?: { roads: string[]; lost: string[] };
 }
 
 /** Varingen comes out on Thursdays. */
@@ -90,6 +92,9 @@ function pick<T>(xs: T[], seed: number): T {
   return xs[Math.floor(rand(seed) * xs.length)];
 }
 
+const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const andList = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} og ${xs[xs.length - 1]}` : xs[0]);
+
 function person(seed: number, from: string[]): string {
   return `${pick(FIRST, seed)} ${pick(LAST, seed + 1)} (${28 + Math.floor(rand(seed + 2) * 50)}) fra ${pick(from, seed + 3)}`;
 }
@@ -113,6 +118,30 @@ function stories(input: EditionInput): Story[] {
   const lied = week.filter((d) => d.hyped && d.happy !== null && d.happy < 0.6);
   const last = week.at(-1);
   const newKm = input.km - input.kmAtLastEdition;
+
+  const plough = input.ploughing;
+  if (plough?.lost.length) {
+    out.push({
+      score: 6,
+      tone: 0,
+      kicker: "Brøytekartet",
+      headline: capitalise(`${andList(plough.lost)} brøytes i vinter`),
+      lead: `Skogeieren har lagt fram vinterens brøytekart, og løypa langs ${andList(plough.lost)} ligger nå under brøytekanten. Løypelaget jobber med alternativer.`,
+      body: [
+        "– Veiene er der for tømmeret og for dem som bor i marka. Det får vi bare respektere, sier lederen i løypelaget.",
+        `– Vi gikk der hver søndag i fjor. Nå må vi finne en ny runde, sier ${person(seed + 41, NORTH)}.`,
+      ],
+    });
+  } else if (plough?.roads.length) {
+    out.push({
+      score: 1.5,
+      tone: 0,
+      kicker: "Brøytekartet",
+      headline: "Brøytekartet for vinteren er klart",
+      lead: `I vinter brøyter skogeieren blant annet ${andList(plough.roads.slice(0, 3))}. Skiløpere bes holde seg unna veiene når tømmerbilene går.`,
+      body: [],
+    });
+  }
 
   if (input.km === 0) {
     out.push({

@@ -55,3 +55,6 @@ export const BUILD_COST: Record<Terrain, number | null> = {
   [Terrain.Built]: null,
   [Terrain.Rock]: 600,
 };
+
+/** An unploughed forest road is already cleared and graded: the snowcat only has to drive it. */
+export const FOREST_ROAD_COST = 50;

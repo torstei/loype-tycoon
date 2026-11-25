@@ -72,6 +72,8 @@ export interface SaveGame {
     /** Set once the snow is gone: the meeting and the summer are still to come. */
     ended?: SeasonSummary;
     summer?: Summer;
+    /** Ploughed roads the club lost track along when this winter began. */
+    ploughedAway?: string[];
   };
   /** Absent in saves from before the account existed. */
   accounts?: { history: AccountRow[]; dayStartBudget: number };
@@ -123,6 +125,10 @@ export interface TrackRestore {
   dropped: number;
   /** Kept, but the crossing had to change because the road or railway did. */
   changed: number;
+  /** Taken up because it ran along a forest road that is ploughed this winter. */
+  ploughed: number;
+  /** The ploughed roads that track was taken up from. */
+  ploughedRoads: string[];
 }
 
 /**
@@ -130,7 +136,8 @@ export interface TrackRestore {
  * tiles that no longer fit are dropped and crossings follow what is there now.
  */
 export function decodeTracks(map: GameMap, tracks: TrackNetwork, records: TrackRecord[]): TrackRestore {
-  const result: TrackRestore = { restored: 0, dropped: 0, changed: 0 };
+  const result: TrackRestore = { restored: 0, dropped: 0, changed: 0, ploughed: 0, ploughedRoads: [] };
+  const ploughedUnder: [number, number][] = [];
   for (const [col, row, fresh, newSnow, ice, wet, groomedAt, trampledAt, crossing, usage] of records) {
     const local = map.fromGrid([col, row]);
     if (!local || tracks.cost(...local) === null) {
@@ -145,7 +152,11 @@ export function decodeTracks(map: GameMap, tracks: TrackNetwork, records: TrackR
       result.dropped++;
       continue;
     }
-    if (obstacle === "road" && (type === Crossing.None || type === Crossing.Existing || type === Crossing.Underpass)) {
+    if (obstacle === "road" && type === Crossing.None) {
+      // Open ground before, so a forest road ploughed this winter: crossing it is fine, following it is not.
+      ploughedUnder.push([x, y]);
+      type = Crossing.AtGrade;
+    } else if (obstacle === "road" && (type === Crossing.Existing || type === Crossing.Underpass)) {
       type = Crossing.AtGrade;
       result.changed++;
     } else if (!obstacle && type !== Crossing.None && type !== Crossing.Existing) {
@@ -163,8 +174,47 @@ export function decodeTracks(map: GameMap, tracks: TrackNetwork, records: TrackR
     tracks.usage[i] = usage;
     result.restored++;
   }
+  const under = new Set(ploughedUnder.map(([x, y]) => map.index(x, y)));
+  const seen = new Set<number>();
+  for (const [sx, sy] of ploughedUnder) {
+    if (seen.has(map.index(sx, sy))) {
+      continue;
+    }
+    const stretch: [number, number][] = [];
+    const queue: [number, number][] = [[sx, sy]];
+    seen.add(map.index(sx, sy));
+    while (queue.length) {
+      const [x, y] = queue.pop()!;
+      stretch.push([x, y]);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const i = map.inside(x + dx, y + dy) ? map.index(x + dx, y + dy) : -1;
+          if (under.has(i) && !seen.has(i)) {
+            seen.add(i);
+            queue.push([x + dx, y + dy]);
+          }
+        }
+      }
+    }
+    if (stretch.length > MAX_CROSSING_TILES) {
+      for (const [x, y] of stretch) {
+        tracks.remove(x, y);
+      }
+      result.restored -= stretch.length;
+      result.ploughed += stretch.length;
+      const road = map.roadName(...stretch[0]);
+      if (road && !result.ploughedRoads.includes(road)) {
+        result.ploughedRoads.push(road);
+      }
+    } else {
+      result.changed += stretch.length;
+    }
+  }
   return result;
 }
+
+/** A track meeting a newly ploughed road on more tiles than this was following it, not crossing it. */
+const MAX_CROSSING_TILES = 3;
 
 /** Check a parsed file looks like a save this game can read; returns a reason if not. */
 export function validate(data: unknown, map: GameMap): string | null {

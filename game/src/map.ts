@@ -27,6 +27,8 @@ export interface MapLine {
   pts: [number, number][];
   name?: string;
   traffic?: number;
+  /** A forest road the landowner ploughs in these winters, by the year each winter starts. */
+  ploughed?: number[];
 }
 
 /**
@@ -61,8 +63,12 @@ interface MapDocument {
   pois: Poi[];
   lines: MapLine[];
   alpine?: { lifts: AlpineLift[]; slopes: AlpineSlope[] };
+  /** Tiles of forest road ploughed each winter, by the year the winter starts. */
+  ploughing?: Record<string, number[]>;
   attribution: string;
 }
+
+const TRAFFIC_SHIFT = 8;
 
 export class GameMap {
   readonly name: string;
@@ -80,6 +86,9 @@ export class GameMap {
   readonly lines: MapLine[];
   readonly alpine: { lifts: AlpineLift[]; slopes: AlpineSlope[] } | undefined;
   readonly attribution: string;
+  private readonly ploughing: Record<string, number[]>;
+  /** Forest roads ploughed this winter, set by plough(). */
+  readonly ploughed: MapLine[] = [];
 
   constructor(doc: MapDocument) {
     if (doc.grid.size !== GRID_SIZE || doc.tileSize !== GRID_SIZE) {
@@ -99,6 +108,31 @@ export class GameMap {
     this.lines = doc.lines;
     this.alpine = doc.alpine;
     this.attribution = doc.attribution;
+    this.ploughing = doc.ploughing ?? {};
+  }
+
+  /**
+   * Plough the forest roads the landowner keeps open this winter: they become quiet roads to
+   * cross. A winter without a published plan follows one of the others. Call once, before play.
+   */
+  plough(year: number) {
+    const winters = Object.keys(this.ploughing).map(Number).sort((a, b) => a - b);
+    if (!winters.length) {
+      return;
+    }
+    const winter = winters.includes(year) ? year : winters[((year % winters.length) + winters.length) % winters.length];
+    for (const i of this.ploughing[winter]) {
+      if (!(this.flags[i] & Flag.Road)) {
+        this.flags[i] = (this.flags[i] & ~(3 << TRAFFIC_SHIFT)) | Flag.Road | (1 << TRAFFIC_SHIFT);
+      }
+    }
+    for (const l of [...this.lines]) {
+      if (l.kind === "forest_road" && l.ploughed?.includes(winter)) {
+        l.kind = "road";
+        this.ploughed.push(l);
+        this.lines.push({ kind: "road_name", traffic: 1, pts: l.pts, name: l.name ? `${l.name} (brøytet skogsbilvei)` : "Brøytet skogsbilvei" });
+      }
+    }
   }
 
   static async load(name: string): Promise<GameMap> {
@@ -139,7 +173,7 @@ export class GameMap {
 
   /** How busy the road on a tile is: 0 none, 1 local road, 2 county road, 3 trunk road. */
   traffic(x: number, y: number): number {
-    return (this.flags[this.index(x, y)] >> 8) & 3;
+    return (this.flags[this.index(x, y)] >> TRAFFIC_SHIFT) & 3;
   }
 
   /** The name of the road on a tile: the nearest road of the same class, null if it has no name. */
