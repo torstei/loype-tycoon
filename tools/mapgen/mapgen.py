@@ -111,6 +111,22 @@ TRAFFIC = {
     "secondary": 2, "tertiary": 2, "secondary_link": 2, "tertiary_link": 2,
 }
 
+# Barrier-gated forest roads lie under snow in winter and make good ski track. The landowner
+# ploughs some of them for logging; which ones changes from winter to winter.
+GATED = {"private", "forestry", "agricultural", "no"}
+PLOUGHED = {int(year): set(ids) for year, ids in
+            json.loads((Path(__file__).resolve().parent / "ploughed.json").read_text())["winters"].items()}
+
+
+def gated_forest_road(tags):
+    return (tags.get("highway") in {"unclassified", "service"}
+            and (tags.get("motor_vehicle") in GATED or tags.get("access") in GATED))
+
+
+def ploughed_winters(el):
+    return sorted(year for year, ids in PLOUGHED.items() if el["id"] in ids)
+
+
 MAJOR_HIGHWAYS = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
                   "residential", "service", "living_street",
                   "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
@@ -269,6 +285,7 @@ def build_layers(region, osm):
     at_grade_rails = []
     at_grade_ways = []
     traffic = {1: [], 2: [], 3: []}
+    ploughable = []
     road_names = []
     pois = []
 
@@ -309,11 +326,13 @@ def build_layers(region, osm):
                 at_grade_ways.append(utm(way_line(el)))
         if carries_traffic and tunnel:
             pass
-        elif hw in MAJOR_HIGHWAYS:
+        elif (hw == "track" or gated_forest_road(tags)) and ploughed_winters(el):
+            ploughable.append((utm(way_line(el)), tags.get("name"), ploughed_winters(el)))
+        elif hw in MAJOR_HIGHWAYS and not gated_forest_road(tags):
             line = (ROAD, way_line(el))
             traffic[TRAFFIC.get(hw, 1)].append(utm(line[1]))
             road_names.append((utm(line[1]), road_label(tags), TRAFFIC.get(hw, 1)))
-        elif hw == "track":
+        elif hw == "track" or gated_forest_road(tags):
             line = (FOREST_ROAD, way_line(el))
         elif hw in {"path", "footway", "bridleway", "cycleway", "steps"}:
             line = (PATH, way_line(el))
@@ -347,6 +366,16 @@ def build_layers(region, osm):
             mask = rasterize(geoms, out_shape=shape, transform=transform, fill=0,
                              default_value=1, all_touched=True)
             flags[mask == 1] |= flag
+    ploughing = {}
+    if ploughable:
+        mask = rasterize([mapping(g) for g, _, _ in ploughable if not g.is_empty], out_shape=shape,
+                         transform=transform, fill=0, default_value=1, all_touched=True)
+        flags[mask == 1] |= FOREST_ROAD
+        for year in sorted(PLOUGHED):
+            geoms = [mapping(g) for g, _, years in ploughable if year in years and not g.is_empty]
+            if geoms:
+                mask = rasterize(geoms, out_shape=shape, transform=transform, fill=0, default_value=1, all_touched=True)
+                ploughing[str(year)] = np.flatnonzero(mask.ravel() == 1).tolist()
     # Quieter roads first, so a tile shared with a busier road ends up with the busier one.
     for level, geoms in sorted(traffic.items()):
         geoms = [mapping(g) for g in geoms if not g.is_empty]
@@ -367,7 +396,7 @@ def build_layers(region, osm):
                     flags[r, c] |= LEVEL_CROSSING
 
     pois = [p for p in pois if p is not None]
-    return terrain, flags, pois, vector_lines(region, lines) + named_roads(region, road_names)
+    return terrain, flags, pois, vector_lines(region, lines) + named_roads(region, road_names) + ploughable_lines(region, ploughable), ploughing
 
 
 def level_crossings(rails, ways):
@@ -430,6 +459,24 @@ def vector_lines(region, lines):
                        for x, y in part.coords]
                 if len(pts) >= 2:
                     out.append({"kind": LINE_KINDS[flag], "pts": pts})
+    return out
+
+
+def ploughable_lines(region, ploughable):
+    """Forest roads ploughed in some winters, with the winters, so the game can draw this one's."""
+    top = region.max_y
+    out = []
+    for g, name, years in ploughable:
+        for part in getattr(g, "geoms", [g]):
+            if part.geom_type != "LineString" or part.is_empty:
+                continue
+            pts = [[round((x - region.min_x) / region.tile_m, 2), round((top - y) / region.tile_m, 2)]
+                   for x, y in part.simplify(region.tile_m * 0.25).coords]
+            if len(pts) >= 2:
+                entry = {"kind": "forest_road", "ploughed": years, "pts": pts}
+                if name:
+                    entry["name"] = name
+                out.append(entry)
     return out
 
 
@@ -572,7 +619,7 @@ def main():
     cabins = fetch_osm(region, bbox_latlon(region), cabin_query, "cabins")
     alpine = fetch_osm(region, bbox_latlon(region), alpine_query, "alpine")
     elev = fetch_dtm(region)
-    terrain, flags, pois, lines = build_layers(region, osm)
+    terrain, flags, pois, lines, ploughing = build_layers(region, osm)
     pois += cabin_pois(region, cabins)
 
     doc = {
@@ -590,6 +637,7 @@ def main():
         "pois": pois,
         "lines": lines,
         "alpine": alpine_features(region, alpine),
+        "ploughing": ploughing,
         "attribution": "© OpenStreetMap contributors (ODbL); elevation © Kartverket (CC BY 4.0)",
     }
     (args.out / f"{region.name}.json").write_text(json.dumps(doc, separators=(",", ":")))

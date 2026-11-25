@@ -3,7 +3,7 @@ import { dayLabel } from "./clock";
 /** The local group where skiers and the snowcat driver post about the tracks. */
 export const GROUP_NAME = "Preppestatus Hakadal og omegn";
 
-export type PostKind = "groomed" | "perfect" | "icy" | "snowed" | "moose" | "julehus" | "waffles" | "chairlift" | "offtopic";
+export type PostKind = "groomed" | "perfect" | "icy" | "snowed" | "moose" | "julehus" | "waffles" | "chairlift" | "ploughed" | "offtopic";
 
 export interface Comment {
   author: string;
@@ -35,6 +35,8 @@ export interface PostContext {
   driver: string;
   km?: number;
   waffles?: number;
+  /** A road the post is about. */
+  road?: string;
 }
 
 const FIRST = ["Kristin", "Ole Martin", "Hilde", "Thomas", "Anne Grethe", "Jørn", "Siri", "Espen", "Marit", "Lars Erik", "Tonje", "Rune", "Ida", "Bente", "Øyvind", "Camilla", "Petter", "Gro"];
@@ -90,6 +92,12 @@ const TEXTS: Record<PostKind, Writer[]> = {
     () => "Tok stolheisen opp og gikk innover på toppen. Snøen der oppe er fantastisk! 🚡",
     () => "Stolheis til langrenn. Jeg føler meg litt lat, men mest fornøyd.",
   ],
+  ploughed: [
+    (c) => `Gikk innover ${c.road} med ungene og akebrettet i dag. På vei tilbake var hele veien BRØYTET. Ned til grusen! Hvem bestemmer sånt?? 😡`,
+    (c) => `Hvorfor i all verden brøyter noen ${c.road}? Den er jo perfekt å gå på ski på. Vi kjørte helt fra Bærum for dette.`,
+    (c) => `Til deg som brøytet ${c.road} i dag: Vi hadde to unger og en pulk der inne. Takk for ingenting.`,
+    (c) => `Nydelig føre innover ${c.road}, men på vei hjem gikk vi på grus. Noen i Oslo kommune bør få beskjed om dette.`,
+  ],
   offtopic: [
     () => "Noen som har funnet en blå vott ved parkeringen? Strikket av svigermor, så den MÅ finnes.",
     () => "Har noen sett en grå katt på Ekra? Han heter Tiger og lyder ikke navnet.",
@@ -108,6 +116,14 @@ const COMMENTS: Record<PostKind, Writer[]> = {
   julehus: [() => "Vi var der i går! Helt magisk ✨", () => "Han har visst flere lys i år", () => "Beste julestemningen i bygda 🎄"],
   waffles: [() => "Beste vaflene i Nittedal", () => "Med brunost eller syltetøy?", () => "Rømme og syltetøy, selvsagt"],
   chairlift: [() => "Endelig!", () => "Må prøves!", () => "Hvor mye koster det?"],
+  ploughed: [
+    () => "Det er en skogsbilvei. Den er der for tømmerbilene.",
+    () => "Folk bor faktisk innover der, de må komme seg hjem de også 🙂",
+    () => "La meg gjette: Ullern?",
+    () => "Brøytekartet ligger ute på nett, altså.",
+    () => "Tømmerbilen bryr seg lite om akebrett.",
+    () => "Løypelaget har fine spor rett ved siden av!",
+  ],
   offtopic: [() => "Feil gruppe 😅", () => "Har du sjekket under bilen?", () => "Delt!", () => "Håper det ordner seg"],
 };
 
@@ -120,6 +136,7 @@ const LIKES: Record<PostKind, [number, number]> = {
   julehus: [90, 240],
   waffles: [20, 60],
   chairlift: [30, 90],
+  ploughed: [20, 70],
   offtopic: [1, 8],
 };
 
@@ -132,6 +149,7 @@ const TONE: Record<PostKind, -1 | 0 | 1> = {
   julehus: 0,
   waffles: 1,
   chairlift: 1,
+  ploughed: 0,
   offtopic: 0,
 };
 

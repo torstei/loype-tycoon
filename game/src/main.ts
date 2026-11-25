@@ -130,6 +130,10 @@ async function main() {
   updateCompact();
   window.addEventListener("resize", updateCompact);
   const map = await GameMap.load("hakadal");
+  // Pick up where we left off: an explicit load or new game, otherwise the autosave.
+  const boot = takeBoot();
+  const saved = boot?.kind === "new" ? null : boot?.kind === "file" ? boot.save : readSlot(boot?.kind === "slot" ? boot.slot : "auto");
+  map.plough(typeof saved?.season?.year === "number" ? saved.season.year : FIRST_SEASON);
   const tracks = new TrackNetwork(map);
   const clock = new GameClock();
   clock.paused = true;
@@ -277,7 +281,7 @@ async function main() {
   if (new URLSearchParams(location.search).has("debug")) {
     Object.assign(window, { loype: { map, world, camera, whimsy, alpine, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks,
       fastForward: (hours: number, step?: number) => fastForward(hours, step), history: () => history,
-      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition(), photo: (x: number, y: number) => takePhoto(x, y), groundShot: (view: View) => groundShot(view), viewAlongTrack: (x: number, y: number, subject?: View["subject"]) => viewAlongTrack(x, y, subject), viewDownLift: () => viewDownLift(), viewIntoSun: (x: number, y: number, subject?: View["subject"]) => viewIntoSun(x, y, subject), post: (kind: PostKind, x?: number, y?: number, view?: View | null) => post(kind, x === undefined ? null : [x, y!], {}, view ?? null), feed: () => feed } });
+      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition(), photo: (x: number, y: number) => takePhoto(x, y), groundShot: (view: View) => groundShot(view), viewAlongTrack: (x: number, y: number, subject?: View["subject"]) => viewAlongTrack(x, y, subject), viewDownLift: () => viewDownLift(), viewIntoSun: (x: number, y: number, subject?: View["subject"]) => viewIntoSun(x, y, subject), post: (kind: PostKind, x?: number, y?: number, view?: View | null, road?: string) => post(kind, x === undefined ? null : [x, y!], { road }, view ?? null), feed: () => feed } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -1094,6 +1098,7 @@ async function main() {
     ended: undefined as SeasonSummary | undefined,
     summer: undefined as Summer | undefined,
     album: [] as AlbumPhoto[],
+    ploughedAway: undefined as string[] | undefined,
   };
   let editionIndex = -1;
   const paperPanel = document.getElementById("paper")!;
@@ -1173,6 +1178,9 @@ async function main() {
       weather,
       lowest: elevations.length ? Math.min(...elevations) : map.elevationAt(startPoi.x, startPoi.y),
       survey: crowd.takeSurvey(),
+      ploughing: paper.editions.length === 0
+        ? { roads: [...new Set(map.ploughed.map((l) => l.name).filter((n): n is string => !!n))], lost: season.ploughedAway ?? [] }
+        : undefined,
     });
     paper.bestWeek = Math.max(paper.bestWeek, paper.week.reduce((s, d) => s + d.skiers, 0));
     paper.kmAtLastEdition = trackKm();
@@ -1355,7 +1363,7 @@ async function main() {
   /** Posts kept, and how many of the newest keep their photo; old photos would fill the save. */
   const FEED_KEPT = 30;
   const FEED_PHOTOS = 10;
-  const post = (kind: PostKind, at: [number, number] | null, extra: { km?: number; waffles?: number; driver?: string } = {}, view: View | null = null) => {
+  const post = (kind: PostKind, at: [number, number] | null, extra: { km?: number; waffles?: number; driver?: string; road?: string } = {}, view: View | null = null) => {
     const [x, y] = at ?? [startPoi.x, startPoi.y];
     const p = writePost(kind, {
       day: clock.day,
@@ -1366,6 +1374,7 @@ async function main() {
       driver: extra.driver ?? fleet.groomers[0]?.name ?? "Gamle Gunnar",
       km: extra.km,
       waffles: extra.waffles,
+      road: extra.road,
     }, view ? groundShot(view) : at ? takePhoto(x, y) : null, Math.floor(clock.hours * 7.3) + feed.length);
     feed.push(p);
     if (p.photo && at) {
@@ -1449,6 +1458,17 @@ async function main() {
     const top = alpine.topStation;
     if (top && crowd.liftRunning && since("chairlift") > 24 * 6 && chance(0.2)) {
       post("chairlift", [Math.floor(top[0]), Math.floor(top[1])], {}, viewDownLift());
+      return;
+    }
+    const named = map.ploughed.filter((l) => l.name);
+    const road = named[Math.floor(Math.random() * named.length)];
+    if (road && day && since("ploughed") > 24 * 12 && chance(isWeekend(clock.day) ? 0.12 : 0.03)) {
+      const i = 1 + Math.floor(Math.random() * (road.pts.length - 1));
+      const [[ax, ay], [bx, by]] = [road.pts[i - 1], road.pts[i]];
+      const len = Math.hypot(bx - ax, by - ay) || 1;
+      const [dx, dy] = [(bx - ax) / len, (by - ay) / len];
+      const skier = { kind: "skier" as const, x: ax + dx * 1.6, y: ay + dy * 1.6, colour: SKIER_COLOURS[Math.floor(Math.random() * SKIER_COLOURS.length)] };
+      post("ploughed", [Math.floor(ax), Math.floor(ay)], { road: road.name }, { camera: [ax - dx * 0.4, ay - dy * 0.4], target: [ax + dx * 3, ay + dy * 3], subject: skier });
       return;
     }
     if (h >= 8 && h < 23 && since("offtopic") > 72 && chance(0.03)) {
@@ -2002,7 +2022,9 @@ async function main() {
             ? `🌉 Bru/undergang med vei: ${kr(cost)} — sporet må dele asfalten med bilene`
             : map.has(x, y, Flag.Passage) && map.has(x, y, Flag.Rail)
               ? `🌉 Eksisterende bru/undergang: ${kr(cost)}`
-              : `Bygge løype: ${kr(cost)}`;
+              : tracks.onForestRoad(x, y)
+                ? `Bygge løype på den ubrøytede skogsbilveien: ${kr(cost)}`
+                : `Bygge løype: ${kr(cost)}`;
     if (link) {
       action += `<br>Kobles til løypenettet med ${link.length} rute${link.length === 1 ? "" : "r"} til`;
     }
@@ -3171,6 +3193,8 @@ async function main() {
     feed,
   });
 
+  const list = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} og ${xs[xs.length - 1]}` : xs[0]);
+
   /** Rebuild a saved game on this freshly started page. Returns what to tell the player. */
   const restore = (save: SaveGame): string => {
     timeStarted = true;
@@ -3263,9 +3287,16 @@ async function main() {
     if (result.changed > 0) {
       notes.push(`${result.changed} kryssinger ble endret`);
     }
-    return changed
-      ? `Kartet er oppdatert siden spillet ble lagret${notes.length ? `: ${notes.join(", ")}` : ", men alt passet"}.`
+    const roads = result.ploughedRoads.map((r) => r.replace(" (brøytet skogsbilvei)", "")).filter((r) => r !== "Brøytet skogsbilvei");
+    if (result.ploughed > 0) {
+      season.ploughedAway = roads.length ? roads : ["en skogsbilvei"];
+    }
+    const ploughed = result.ploughed > 0
+      ? ` ${roads.length ? `${list(roads)} brøytes` : "En skogsbilvei brøytes"} i vinter, og løypa langs veien er borte. Løypelaget jobber med alternativer.`
       : "";
+    return (changed
+      ? `Kartet er oppdatert siden spillet ble lagret${notes.length ? `: ${notes.join(", ")}` : ", men alt passet"}.`
+      : "") + ploughed;
   };
 
   let leaving = false;
@@ -3374,9 +3405,6 @@ async function main() {
   });
   document.getElementById("menu-button")!.addEventListener("click", () => toggleMenu());
 
-  // Pick up where we left off: an explicit load or new game, otherwise the autosave.
-  const boot = takeBoot();
-  const saved = boot?.kind === "new" ? null : boot?.kind === "file" ? boot.save : readSlot(boot?.kind === "slot" ? boot.slot : "auto");
   if (saved) {
     const problem = validate(saved, map);
     if (problem) {

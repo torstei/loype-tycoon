@@ -1,5 +1,5 @@
 import { GameMap } from "./map";
-import { BUILD_COST, Flag } from "./terrain";
+import { BUILD_COST, Flag, FOREST_ROAD_COST } from "./terrain";
 import { Weather } from "./weather";
 
 /** Below this snow depth a groomer only scrapes gravel. */
@@ -216,6 +216,11 @@ export class TrackNetwork {
     return this.map.has(x, y, Flag.Road) || this.map.has(x, y, Flag.ForestRoad);
   }
 
+  /** An unploughed forest road away from the main roads: ready-made track. */
+  onForestRoad(x: number, y: number): boolean {
+    return this.map.has(x, y, Flag.ForestRoad) && !this.map.has(x, y, Flag.Road) && !this.map.has(x, y, Flag.Rail);
+  }
+
   /** A planovergang: the one place the railway may be crossed on the level. */
   levelCrossing(x: number, y: number): boolean {
     return this.map.inside(x, y) && this.map.has(x, y, Flag.LevelCrossing);
@@ -256,6 +261,9 @@ export class TrackNetwork {
     const base = BUILD_COST[this.map.terrainAt(x, y)] ?? (corridor ? 150 : null);
     if (base === null) {
       return null;
+    }
+    if (this.onForestRoad(x, y)) {
+      return FOREST_ROAD_COST;
     }
     const slope = this.map.slopeAt(x, y);
     if (slope > MAX_SLOPE && !this.graded(x, y)) {
