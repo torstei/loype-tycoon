@@ -116,7 +116,7 @@ export function inspectHtml(what: Inspected): string {
         <li>Kjørt i vinter: ${what.totalKm.toFixed(0)} km</li>
         ${some(SNOWCAT_FACTS, 2, seed).map((f) => `<li>${f}</li>`).join("")}
       </ul>
-      <p class="actions">${camera("Ta bilde")}<button data-inspect="live">📹 Direkte fra førerhytta</button></p>`;
+      <p class="actions">${camera("Ta bilde")}<button data-inspect="live">📹 Direkte fra førerhytta</button><button data-inspect="take-wheel">🕹 Kjør selv</button></p>`;
   }
   const late = Math.floor(rand(what.seed) * 14);
   return `
@@ -143,10 +143,13 @@ export const LIVE_PACES: Record<"snowcat" | "train", [number | null, string][]> 
   train: [[1, "Sanntid"], [3, "3× sanntid"], [null, "Spillfart"]],
 };
 
-export function cameraHtml(o: { kind: Inspected["kind"]; label: string; mode: string; zoom: number; manual: boolean; live?: { follow: boolean; pace: number | null } }): string {
+export function cameraHtml(o: { kind: Inspected["kind"]; label: string; mode: string; zoom: number; manual: boolean; live?: { follow: boolean; pace: number | null; driving?: { go: boolean; turn: -1 | 0 | 1 } | null } }): string {
   const choices = PHOTO_MODES[o.kind].filter(([id]) => !o.live || id !== "of");
   const modes = choices.map(([id, text]) => `<button data-inspect="${id}" class="${id === o.mode ? "on" : ""}">${text(o.label)}</button>`).join("");
-  const how = o.live
+  const driving = o.live?.driving;
+  const how = driving
+    ? "Du kjører: ↑ kjører, ↓ stopper (og snur når du står), ← → velger vei i neste kryss. Maskina følger løypa og prepper det som trenger det."
+    : o.live
     ? "Spillet går videre mens du ser på."
     : o.mode === "of"
       ? `Klikk eller dra på kartet der du vil stå, så ser du mot ${o.label}.`
@@ -155,15 +158,20 @@ export function cameraHtml(o: { kind: Inspected["kind"]; label: string; mode: st
         : `Fra førersetet${o.kind === "train" ? " i toget" : ""}.`;
   return `
     <div class="head"><strong>${o.live ? `📹 Direkte fra ${o.kind === "train" ? "førerhuset" : "førerhytta"}` : "📷 Ta bilde"}</strong><button data-inspect="cancel" aria-label="Lukk">✕</button></div>
-    <p class="modes">${modes}${o.live ? `<button data-inspect="follow" class="${o.live.follow ? "on" : ""}">Følg på kartet</button>` : ""}</p>
+    <p class="modes">${modes}${o.live ? `<button data-inspect="follow" class="${o.live.follow ? "on" : ""}">Følg på kartet</button>` : ""}${o.live && o.kind === "snowcat" ? `<button data-inspect="wheel" class="${driving ? "on" : ""}">🕹 Kjør selv</button>` : ""}</p>
     <canvas class="preview" width="480" height="300"></canvas>
+    ${driving ? `<p class="modes drive">
+      <button data-inspect="drive-left" class="${driving.turn === -1 ? "on" : ""}">⬅ Venstre</button>
+      <button data-inspect="drive-go" class="${driving.go ? "" : "primary"}">${driving.go ? "⏸ Stopp" : "⬆ Kjør"}</button>
+      <button data-inspect="drive-right" class="${driving.turn === 1 ? "on" : ""}">Høyre ➡</button>
+      <button data-inspect="drive-back">↩ Snu</button></p>` : ""}
     ${o.live ? `<p class="live-status"></p><p class="modes pace">${LIVE_PACES[o.kind === "train" ? "train" : "snowcat"].map(([pace, text], i) => `<button data-inspect="pace-${i}" class="${pace === o.live!.pace ? "on" : ""}">${text}</button>`).join("")}</p>` : ""}
     <p class="lens">
       <button data-inspect="zoom-out" aria-label="Zoom ut">−</button><span class="zoom">${zoomLabel(o.zoom)}</span><button data-inspect="zoom-in" aria-label="Zoom inn">+</button>
       <button data-inspect="tilt-up" aria-label="Se opp">⬆</button><button data-inspect="tilt-down" aria-label="Se ned">⬇</button>
       <button data-inspect="auto" class="${o.manual ? "" : "on"}">Auto</button>
     </p>
-    <p class="hint">${how} Dra i bildet for å snu og vippe, rull for å zoome. Piltaster og + − gjør det samme, Enter knipser.</p>
+    <p class="hint">${how} Dra i bildet for å snu og vippe, rull for å zoome.${driving ? " + − zoomer" : " Piltaster og + − gjør det samme"}, Enter knipser.</p>
     <p class="actions"><button data-inspect="shoot" class="primary">📸 Knips</button><button data-inspect="cancel">${o.live ? "Lukk" : "Avbryt"}</button></p>`;
 }
 

@@ -615,6 +615,7 @@ async function main() {
           <span class="buttons">
           <button class="mode${g.onCall ? " on" : ""}" data-oncall="${i}" title="${g.onCall ? `${g.name} står i garasjen til du sender den ut. Klikk for å la den kjøre selv.` : `${g.name} kjører selv når løypene trenger det. Klikk for å la den stå til du sender den ut.`}">${g.onCall ? "✋ På vent" : "🔁 Auto"}</button>
           ${drive}
+          <button class="drive" data-wheel="${i}" title="Kjør ${g.name} selv, fra førerhytta">🕹</button>
           <button class="goto" data-goto="${i}" title="Vis ${g.name} på kartet">Gå til</button>
           <button class="kiosk" data-kiosk="${i}" title="Vaffelsalg ved garasjen">🧇 ${k ? `${k.spec.short}${k.broken ? " (i ustand)" : ""}` : "Vaffelsalg?"}</button></span></div>`;
       }).join("")}
@@ -632,6 +633,11 @@ async function main() {
       const g = fleet.groomers[Number(modeButton.dataset.oncall)];
       g.onCall = !g.onCall;
       refreshHud();
+      return;
+    }
+    const wheelButton = (e.target as HTMLElement).closest<HTMLElement>("[data-wheel]");
+    if (wheelButton) {
+      driveGroomer(fleet.groomers[Number(wheelButton.dataset.wheel)]);
       return;
     }
     const driveButton = (e.target as HTMLElement).closest<HTMLElement>("[data-drive]");
@@ -1740,7 +1746,7 @@ async function main() {
         mode: shooting.mode,
         zoom: photoView()?.zoom ?? 1,
         manual: shooting.zoom !== null || shooting.tilt !== 0,
-        live: shooting.live ? { follow: shooting.follow, pace: clock.slowMotion } : undefined,
+        live: shooting.live ? { follow: shooting.follow, pace: clock.slowMotion, driving: inspected.kind === "snowcat" ? inspected.groomer.steering : null } : undefined,
       });
       renderPreview();
     } else if (inspected.kind === "skier") {
@@ -1756,6 +1762,9 @@ async function main() {
 
   const closeInspect = () => {
     tuckAway(false);
+    if (inspected?.kind === "snowcat") {
+      inspected.groomer.releaseControls();
+    }
     if (clock.slowMotion !== null) {
       setLivePace(null);
     }
@@ -1790,6 +1799,48 @@ async function main() {
     }
     camera.frame(g.px * PX, g.py * PX, app.screen.width / 2, app.screen.height / 2, GOTO_ZOOM_LEVEL);
     openInspect({ kind: "snowcat", groomer: g });
+  };
+
+  /** Take the wheel of a snowcat, sending it out of the garage if need be, and watch from its cab. */
+  const driveGroomer = (g: Groomer) => {
+    const refused = g.takeControls(tracks);
+    if (refused) {
+      showToast(`🚜 ${refused}`);
+      return;
+    }
+    if (inspected?.kind !== "snowcat" || inspected.groomer !== g) {
+      openInspect({ kind: "snowcat", groomer: g });
+    }
+    if (!shooting?.live) {
+      startShooting(true);
+    } else {
+      renderInspect();
+    }
+  };
+
+  /** The player's steering, from the buttons or the arrow keys. */
+  const steer = (how: "go" | "stop" | "left" | "right" | "back") => {
+    const wheel = inspected?.kind === "snowcat" ? inspected.groomer.steering : null;
+    if (!wheel) {
+      return;
+    }
+    if (how === "go") {
+      wheel.go = true;
+    } else if (how === "stop") {
+      if (!wheel.go) {
+        wheel.turnAround = true;
+        wheel.go = true;
+      } else {
+        wheel.go = false;
+      }
+    } else if (how === "back") {
+      wheel.turnAround = true;
+      wheel.go = true;
+    } else {
+      const turn = how === "left" ? -1 : 1;
+      wheel.turn = wheel.turn === turn ? 0 : turn;
+    }
+    renderInspect();
   };
 
   /** The screen point beside the photo panel where the subject is shown. */
@@ -1920,8 +1971,9 @@ async function main() {
       const status = inspectPanel.querySelector(".live-status");
       if (status) {
         const g = inspected.kind === "snowcat" ? inspected.groomer : null;
+        const next = g?.steering?.turn ? ` · neste kryss: til ${g.steering.turn < 0 ? "venstre" : "høyre"}` : "";
         status.textContent = g
-          ? `${g.status} · ${((g.groomedTonight * map.tileSize) / 1000).toFixed(1).replace(".", ",")} km i natt`
+          ? `${g.status} · ${((g.groomedTonight * map.tileSize) / 1000).toFixed(1).replace(".", ",")} km i natt${next}`
           : whimsy.train?.stopped ? "Står på stasjonen" : "Gjøvikbanen, i fart";
       }
     }
@@ -1940,6 +1992,19 @@ async function main() {
     } else if (action.startsWith("pace-") && shooting?.live) {
       setLivePace(LIVE_PACES[inspected.kind === "train" ? "train" : "snowcat"][Number(action.slice(5))][0]);
       renderInspect();
+    } else if (action === "take-wheel" && inspected.kind === "snowcat") {
+      driveGroomer(inspected.groomer);
+    } else if (action === "wheel" && inspected.kind === "snowcat") {
+      if (inspected.groomer.steering) {
+        inspected.groomer.releaseControls();
+        renderInspect();
+      } else {
+        driveGroomer(inspected.groomer);
+      }
+    } else if (action === "drive-go") {
+      steer(inspected.kind === "snowcat" && inspected.groomer.steering?.go ? "stop" : "go");
+    } else if (action === "drive-left" || action === "drive-right" || action === "drive-back") {
+      steer(action === "drive-left" ? "left" : action === "drive-right" ? "right" : "back");
     } else if (action === "follow" && shooting) {
       shooting.follow = !shooting.follow;
       renderInspect();
@@ -3627,6 +3692,12 @@ async function main() {
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) {
+      return;
+    }
+    const driving = inspected?.kind === "snowcat" && inspected.groomer.steering;
+    if (shooting && !shooting.snap && driving && (e.code.startsWith("Arrow") || e.code === "Backspace")) {
+      steer(e.code === "ArrowUp" ? "go" : e.code === "ArrowDown" ? "stop" : e.code === "ArrowLeft" ? "left" : e.code === "ArrowRight" ? "right" : "back");
+      e.preventDefault();
       return;
     }
     if (shooting && !shooting.snap) {
