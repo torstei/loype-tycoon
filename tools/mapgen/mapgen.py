@@ -620,6 +620,28 @@ def content_hash(*arrays):
     return h.hexdigest()[:16]
 
 
+def write_region_file(path, region):
+    """A starter region file to edit by hand, with the names the game would use anyway; one already there is kept."""
+    if path.exists():
+        return
+    t = region.title
+    starter = {
+        "title": t,
+        "names": {
+            "newspaper": "Lokalavisa",
+            "group": f"Preppestatus {t}",
+            "unofficialGroup": f"Skiføre i {t} (uoffisiell)",
+            "railway": "jernbanen",
+            "trainEnds": [],
+            "skiArea": "alpinbakken",
+            "waffleClub": f"{t} Skytterlag",
+        },
+        "places": {"rename": {}, "hide": [], "add": []},
+    }
+    path.write_text(json.dumps(starter, ensure_ascii=False, indent=2) + "\n")
+    print(f"wrote {path.name}: edit it to name the paper, the start and so on", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("region", nargs="?", choices=sorted(REGIONS))
@@ -677,6 +699,7 @@ def main():
     }
     (args.out / f"{region.name}.json").write_text(json.dumps(doc, separators=(",", ":")))
     write_preview(args.out / f"{region.name}-preview.png", terrain, flags, elev, region)
+    write_region_file(args.out / f"{region.name}.region.json", region)
 
     counts = np.bincount(terrain.ravel(), minlength=len(PREVIEW_COLOURS))
     print("terrain:", {k: int(v) for k, v in zip(

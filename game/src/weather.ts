@@ -1,10 +1,8 @@
 import { MAX_SEASON_DAYS } from "./clock";
+import { region } from "./region";
 
-/** Elevation the weather figures refer to; the valley floor at Hakadal. */
-export const REFERENCE_ELEVATION = 200;
+// The weather is for the region's valley floor; a second snowpack higher up is colder, so more snow and a later melt.
 const LAPSE_RATE = 0.0065;
-/** The second snowpack, about the height of Varingskollen: colder, so more snow and a later melt. */
-export const HIGH_ELEVATION = 500;
 const HIGH_START_EXTRA = 15;
 
 export interface DayPlan {
@@ -72,7 +70,7 @@ const FORECASTERS = [
 export class Weather {
   /** Snow depth at the reference elevation, cm. */
   snowDepth: number;
-  /** Snow depth at HIGH_ELEVATION, cm. */
+  /** Snow depth at the region's high elevation, cm. */
   highDepth: number;
   temperature = 0;
   /** mm/h falling right now; negative never. */
@@ -151,11 +149,11 @@ export class Weather {
   }
 
   localTemperature(elevation: number): number {
-    return this.temperature - (elevation - REFERENCE_ELEVATION) * LAPSE_RATE;
+    return this.temperature - (elevation - region.climate.valley) * LAPSE_RATE;
   }
 
   snowDepthAt(elevation: number): number {
-    const k = (elevation - REFERENCE_ELEVATION) / (HIGH_ELEVATION - REFERENCE_ELEVATION);
+    const k = (elevation - region.climate.valley) / (region.climate.high - region.climate.valley);
     return Math.max(0, this.snowDepth + (this.highDepth - this.snowDepth) * k);
   }
 
@@ -179,7 +177,7 @@ export class Weather {
       const sun = rate > 0 ? 0 : Math.max(0, Math.sin(((h - 7) / 12) * Math.PI));
       const day = Math.floor(t / 24);
       this.snowDepth = settle(this.snowDepth, temp, p, dt, day, sun);
-      this.highDepth = settle(this.highDepth, temp - (HIGH_ELEVATION - REFERENCE_ELEVATION) * LAPSE_RATE, p, dt, day, sun);
+      this.highDepth = settle(this.highDepth, temp - (region.climate.high - region.climate.valley) * LAPSE_RATE, p, dt, day, sun);
     }
     const now = fromHours + hours;
     this.temperature = this.temperatureAt(now);

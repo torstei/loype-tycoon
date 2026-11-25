@@ -1,0 +1,15 @@
+{
+  "title": "Hakadal",
+  "start": { "place": "Hakadal", "kind": "station" },
+  "names": {
+    "newspaper": "Varingen",
+    "group": "Preppestatus Hakadal og omegn",
+    "unofficialGroup": "Skiføre i Hakadal (uoffisiell)",
+    "railway": "Gjøvikbanen",
+    "trainEnds": ["Gjøvik", "Oslo S"],
+    "skiArea": "Varingskollen",
+    "waffleClub": "Nittedal Skytterlag"
+  },
+  "climate": { "valley": 200, "high": 500 },
+  "christmasHouse": { "lat": 60.097103, "lon": 10.867278, "street": "Hadelandsveien" }
+}

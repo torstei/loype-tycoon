@@ -1,3 +1,4 @@
+import { capital, region } from "./region";
 import { personName } from "./feed";
 import { SkierProfile } from "./skiers";
 
@@ -120,14 +121,20 @@ export function inspectHtml(what: Inspected): string {
   }
   const late = Math.floor(rand(what.seed) * 14);
   return `
-    <div class="head"><strong>🚆 Gjøvikbanen</strong><button data-inspect="close" aria-label="Lukk">✕</button></div>
-    <p class="kind">Regiontog mot ${rand(what.seed + 1) < 0.5 ? "Gjøvik" : "Oslo S"}</p>
+    <div class="head"><strong>🚆 ${capital(region.names.railway)}</strong><button data-inspect="close" aria-label="Lukk">✕</button></div>
+    <p class="kind">${trainHeading(what.seed)}</p>
     <ul>
       <li>${late < 3 ? "I rute, mot alle odds" : `${late} minutter forsinket (${late > 9 ? "signalfeil" : "sporveksel"})`}</li>
       <li>${20 + Math.floor(rand(what.seed + 2) * 60)} passasjerer</li>
       ${some(TRAIN_FACTS, 2, what.seed).map((f) => `<li>${f}</li>`).join("")}
     </ul>
     <p class="actions">${camera("Ta bilde")}<button data-inspect="live">📹 Direkte fra førerhuset</button></p>`;
+}
+
+/** Where this train is going: one end of the line or the other, when the region names them. */
+function trainHeading(seed: number): string {
+  const ends = region.names.trainEnds;
+  return ends.length ? `Regiontog mot ${ends[Math.floor(rand(seed + 1) * ends.length)]}` : "Regiontog";
 }
 
 const PHOTO_MODES: Record<Inspected["kind"], [string, (label: string) => string][]> = {

@@ -1,3 +1,4 @@
+import { region } from "./region";
 import { Container, Graphics, Text } from "pixi.js";
 import { isWeekend } from "./clock";
 import { PX } from "./render";
@@ -148,11 +149,13 @@ export const CABIN_TIERS: KioskTier[] = [
 export const CABIN_REACH = 2;
 
 /**
- * An agreement with Nittedal Skytterlag: their best waffle makers staff the stand at weekends.
+ * An agreement with the local shooting club: their best waffle makers staff the stand at weekends.
  * More waffles, a faster queue, and waffles good enough that people pay a little extra.
  */
 export const EXPERTS = {
-  name: "Vaffeleksperter fra Nittedal Skytterlag",
+  get name() {
+    return `Vaffeleksperter fra ${region.names.waffleClub}`;
+  },
   pitch: "Skytterlaget stiller med sine beste vaffelsteikere hver lørdag og søndag. Treffsikre på røra, jevnt stekt, aldri brent. Flere vafler, kortere kø, og folk betaler gjerne litt ekstra for skyttervafler.",
   price: 15_000,
   /** Not at a camping table: they need at least the booth. */
@@ -174,7 +177,7 @@ export class Kiosk {
   soldToday = 0;
   /** Out of order for the current day. */
   broken = false;
-  /** Nittedal Skytterlag helps out at weekends. */
+  /** The shooting club helps out at weekends. */
   experts = false;
   /** Overnight guests, for a cabin with rooms. */
   guestsLastNight = 0;
