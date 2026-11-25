@@ -3061,6 +3061,8 @@ async function main() {
   let lastStroke: { x: number; y: number; paid: number }[] = [];
   /** A finger that has touched down with a building tool but not yet tapped, dragged or pinched. */
   let pendingTouch: { sx: number; sy: number; tile: [number, number] } | null = null;
+  /** A finger on the map that has not yet moved far enough to be panning: lifted there, it is a tap that shows the tile. */
+  let fingerDown: { sx: number; sy: number; tile: [number, number] } | null = null;
 
   /** Start a stroke on a tile: linked to the network if it starts just beside it, a planned route if further, refused with a pointer if too far. */
   const beginStroke = (px: number, py: number): boolean => {
@@ -3496,6 +3498,7 @@ async function main() {
 
   const startPinch = () => {
     pendingTouch = null;
+    fingerDown = null;
     undoShortStroke();
     painting = null;
     panning = null;
@@ -3544,8 +3547,12 @@ async function main() {
         return;
       }
     }
-    // A finger never hovers: tapping a tile is how its info shows up.
-    describe(...tileAt(e.offsetX, e.offsetY));
+    if (e.pointerType === "touch") {
+      // A finger never hovers: a tap, not a pan, is how a tile's info shows up.
+      fingerDown = touches.size > 1 ? null : { sx: e.offsetX, sy: e.offsetY, tile: tileAt(e.offsetX, e.offsetY) };
+    } else {
+      describe(...tileAt(e.offsetX, e.offsetY));
+    }
     if (e.button === 0 && (whimsy.poke(w.x, w.y) || skijorer.poke(w.x, w.y))) {
       return;
     }
@@ -3615,6 +3622,10 @@ async function main() {
   let aiming = false;
   window.addEventListener("pointerup", () => {
     aiming = false;
+    if (fingerDown && !pinch) {
+      describe(...fingerDown.tile);
+    }
+    fingerDown = null;
     if (pendingTouch && !pinch) {
       tapTile(...pendingTouch.tile);
     }
@@ -3653,7 +3664,13 @@ async function main() {
       return;
     }
     const [x, y] = tileAt(e.offsetX, e.offsetY);
-    describe(x, y);
+    if (e.pointerType !== "touch") {
+      describe(x, y);
+    } else if (fingerDown && Math.hypot(e.offsetX - fingerDown.sx, e.offsetY - fingerDown.sy) > TOUCH_SLOP) {
+      fingerDown = null;
+      info.innerHTML = "";
+      cursor.clear();
+    }
     if (pendingTouch && Math.hypot(e.offsetX - pendingTouch.sx, e.offsetY - pendingTouch.sy) > TOUCH_SLOP) {
       // One finger moves the map, as in every map app; track is laid by tapping and confirming.
       pendingTouch = null;
