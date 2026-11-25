@@ -93,7 +93,31 @@ export interface SaveGame {
   };
 }
 
-const key = (slot: Slot) => `loype-tycoon:save:${slot}`;
+/** Each map keeps its own save slots, so playing one never overwrites another's. */
+let saveSpace = "";
+const key = (slot: Slot) => `loype-tycoon:save:${saveSpace}:${slot}`;
+
+/** Use the save slots of a map, moving saves kept from before slots were per map to the map named in them. */
+export function useSaveSpace(mapName: string) {
+  saveSpace = mapName;
+  try {
+    for (const slot of SLOTS) {
+      const legacy = `loype-tycoon:save:${slot}`;
+      const text = localStorage.getItem(legacy);
+      if (!text) {
+        continue;
+      }
+      const owner = (JSON.parse(text) as Partial<SaveGame>).map?.name;
+      const target = owner ? `loype-tycoon:save:${owner}:${slot}` : null;
+      if (target && localStorage.getItem(target) === null) {
+        localStorage.setItem(target, text);
+      }
+      localStorage.removeItem(legacy);
+    }
+  } catch {
+    // Storage that cannot be read holds nothing to move.
+  }
+}
 const BOOT_KEY = "loype-tycoon:boot";
 
 const finite = (n: number) => (Number.isFinite(n) ? n : null);

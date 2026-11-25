@@ -325,7 +325,14 @@ electricity, cash, reputation) for balancing runs.
 python3 -m venv .venv
 .venv/bin/pip install -r tools/mapgen/requirements.txt
 .venv/bin/python tools/mapgen/mapgen.py hakadal
+.venv/bin/python tools/mapgen/mapgen.py --center 61.115,10.466 --size 8 --name lillehammer --title Lillehammer
 ```
+
+The first form makes a region listed in `REGIONS`. The second makes any square in Norway (the
+elevation comes from Kartverket) by its centre in degrees and its width in kilometres, from 2 to 15.
+The game plays a map at `?map=<name>`, and Hakadal when none is given. Each map keeps its own save
+slots. The game starts at the station named like the map's title. Without one it starts at the
+station, parking or named place nearest the middle of the map. The Christmas house is only on Hakadal.
 
 Every map is cut from one global grid of 25 m tiles in EPSG:25833 (UTM 33N): grid tile
 (col, row) covers easting `col·25 … +25` and northing `row·25 … +25`. Regions are defined in
