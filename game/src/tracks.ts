@@ -309,6 +309,51 @@ export class TrackNetwork {
     this.usage[i] = 0;
   }
 
+  /**
+   * The tiles of the crossing a track tile is part of: track straight across the same road or
+   * railway, one tile to the next, all built the same way. Null where the tile crosses nothing.
+   */
+  crossingAt(x: number, y: number): [number, number][] | null {
+    const obstacle = this.obstacle(x, y);
+    if (!this.has(x, y) || !obstacle) {
+      return null;
+    }
+    const type = this.crossing[this.index(x, y)];
+    const seen = new Set([this.index(x, y)]);
+    const out: [number, number][] = [[x, y]];
+    for (let k = 0; k < out.length; k++) {
+      for (const [nx, ny] of this.neighbours(...out[k])) {
+        const i = this.index(nx, ny);
+        if (!seen.has(i) && this.obstacle(nx, ny) === obstacle && this.crossing[i] === type) {
+          seen.add(i);
+          out.push([nx, ny]);
+        }
+      }
+    }
+    return out;
+  }
+
+  /** What a crossing straight over could be rebuilt as, each priced for the whole crossing; empty for any other. */
+  rebuildOptions(tiles: [number, number][]): CrossingOption[] {
+    const [x, y] = tiles[0];
+    const obstacle = this.obstacle(x, y);
+    if (!obstacle || this.crossing[this.index(x, y)] !== Crossing.AtGrade) {
+      return [];
+    }
+    const traffic = Math.max(...tiles.map(([tx, ty]) => this.traffic(tx, ty)));
+    const level = tiles.some(([tx, ty]) => this.levelCrossing(tx, ty));
+    return crossingOptions(obstacle, traffic, level)
+      .filter((o) => o.type !== Crossing.AtGrade)
+      .map((o) => ({ ...o, price: o.price * tiles.length }));
+  }
+
+  /** Rebuild a crossing: the new structure carries fresh track that has yet to be groomed. */
+  rebuild(tiles: [number, number][], type: Crossing) {
+    for (const [x, y] of tiles) {
+      this.add(x, y, type);
+    }
+  }
+
   neighbours(x: number, y: number): [number, number][] {
     return NEIGHBOURS.map(([dx, dy]) => [x + dx, y + dy] as [number, number]).filter(([nx, ny]) => this.has(nx, ny));
   }
