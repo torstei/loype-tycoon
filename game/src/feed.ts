@@ -3,7 +3,7 @@ import { dayLabel } from "./clock";
 /** The local group where skiers and the snowcat driver post about the tracks. */
 export const GROUP_NAME = "Preppestatus Hakadal og omegn";
 
-export type PostKind = "groomed" | "perfect" | "icy" | "snowed" | "moose" | "julehus" | "waffles" | "chairlift" | "ploughed" | "snapshot" | "offtopic";
+export type PostKind = "groomed" | "perfect" | "icy" | "snowed" | "moose" | "julehus" | "waffles" | "chairlift" | "ploughed" | "snapshot" | "skiershot" | "trainshot" | "offtopic";
 
 export interface Comment {
   author: string;
@@ -37,8 +37,10 @@ export interface PostContext {
   waffles?: number;
   /** A road the post is about. */
   road?: string;
-  /** Who or what is in the photo, for the club's own photo posts. */
+  /** Who or what is in the photo. */
   subject?: string;
+  /** Who posts it, when that is someone known rather than a stranger. */
+  author?: string;
 }
 
 const FIRST = ["Kristin", "Ole Martin", "Hilde", "Thomas", "Anne Grethe", "Jørn", "Siri", "Espen", "Marit", "Lars Erik", "Tonje", "Rune", "Ida", "Bente", "Øyvind", "Camilla", "Petter", "Gro"];
@@ -101,10 +103,20 @@ const TEXTS: Record<PostKind, Writer[]> = {
     (c) => `Nydelig føre innover ${c.road}, men på vei hjem gikk vi på grus. Noen i Oslo kommune bør få beskjed om dette.`,
   ],
   snapshot: [
-    (c) => `Dagens bilde fra løypa ved ${c.place} 📸`,
-    (c) => `Fanget ${c.subject ?? "løypa"} ved ${c.place} i dag!`,
+    (c) => `Utsikt fra førerhytta ved ${c.place} 🚜`,
     (c) => `Sånn ser det ut ved ${c.place} akkurat nå. Velkommen ut! ⛷`,
     (c) => `${temp(c.temperature)} grader ved ${c.place}. Bildet sier resten.`,
+  ],
+  skiershot: [
+    (c) => (c.subject ? `Fikk med ${c.subject} ved ${c.place} i dag! 📸` : `Utsikt fra sporet ved ${c.place} 😍`),
+    (c) => `Måtte bare stoppe og ta bilde ved ${c.place}.`,
+    (c) => `${temp(c.temperature)} grader ved ${c.place}. Ingen grunn til å sitte inne!`,
+    (c) => `Dagens tur gikk forbi ${c.place}. Takk til løypelaget! 🙏`,
+  ],
+  trainshot: [
+    (c) => `Utsikt fra førerhuset ved ${c.place} i dag. Dere som sitter bakerst går glipp av mye 🚆`,
+    (c) => `Gjøvikbanen ved ${c.place}. Norges beste kontor.`,
+    (c) => `Sånn ser sporet ut fra toget ved ${c.place}. Skiløperne vinker, og jeg tuter tilbake.`,
   ],
   offtopic: [
     () => "Noen som har funnet en blå vott ved parkeringen? Strikket av svigermor, så den MÅ finnes.",
@@ -132,7 +144,9 @@ const COMMENTS: Record<PostKind, Writer[]> = {
     () => "Tømmerbilen bryr seg lite om akebrett.",
     () => "Løypelaget har fine spor rett ved siden av!",
   ],
-  snapshot: [() => "Nydelig! 😍", () => "Er det meg?? 😄", () => "Hvor er dette?", () => "Blir med i morgen!", () => "Så fint!", () => "Dere er gull!"],
+  snapshot: [() => "Nydelig! 😍", () => "Hvor er dette?", () => "Blir med i morgen!", () => "Så fint!", () => "Dere er gull!"],
+  skiershot: [() => "Nydelig! 😍", () => "Er det meg?? 😄", () => "Hvor er dette?", () => "Misunnelig!", () => "Hvilken smøring?"],
+  trainshot: [() => "Wow, for en utsikt!", () => "Vinker neste gang 👋", () => "Var toget i rute i dag også? 😉", () => "Drømmejobben!"],
   offtopic: [() => "Feil gruppe 😅", () => "Har du sjekket under bilen?", () => "Delt!", () => "Håper det ordner seg"],
 };
 
@@ -147,6 +161,8 @@ const LIKES: Record<PostKind, [number, number]> = {
   chairlift: [30, 90],
   ploughed: [20, 70],
   snapshot: [30, 100],
+  skiershot: [15, 60],
+  trainshot: [40, 140],
   offtopic: [1, 8],
 };
 
@@ -161,12 +177,14 @@ const TONE: Record<PostKind, -1 | 0 | 1> = {
   chairlift: 1,
   ploughed: 0,
   snapshot: 0,
+  skiershot: 0,
+  trainshot: 0,
   offtopic: 0,
 };
 
 export function writePost(kind: PostKind, c: PostContext, photo: string | null, seed: number): Post {
   const driver = kind === "groomed" || kind === "snapshot";
-  const author = driver ? `${c.driver} · løypelaget` : personName(seed);
+  const author = driver ? `${c.driver} · løypelaget` : c.author ?? personName(seed);
   const [lo, hi] = LIKES[kind];
   const mood = TONE[kind] < 0 ? 1.2 - c.reputation * 0.5 : 0.5 + c.reputation;
   const likes = Math.round((lo + rand(seed + 3) * (hi - lo)) * mood);

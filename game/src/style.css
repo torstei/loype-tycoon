@@ -39,7 +39,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; font: 14px system-ui, sa
 #fleet[hidden] { display: none; }
 #fleet .head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
 #fleet .head button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid #9aa8b2; background: #fff; border-radius: 4px; cursor: pointer; }
-#fleet .row { padding: 2px 0; display: flex; align-items: center; gap: 6px; }
+#fleet .row { padding: 2px 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#fleet .buttons { margin-left: auto; display: flex; gap: 4px; }
+#fleet button.mode, #fleet button.drive { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid #9aa8b2;
+  background: #fff; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+#fleet button.mode.on { background: #fde9c8; border-color: #c98a2b; }
 #fleet .name { font-weight: 600; }
 #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); padding: 8px 14px;
   background: rgba(255, 255, 255, 0.95); border-radius: 8px; box-shadow: 0 3px 12px rgba(30, 50, 90, 0.25);

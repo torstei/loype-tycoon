@@ -177,6 +177,10 @@ export class Groomer {
   private onRoad = false;
   groomedTonight = 0;
   totalGroomed = 0;
+  /** Stays in the garage until sent out, to save diesel. */
+  onCall = false;
+  /** Sent out by hand: works the whole shift, whatever the time of day. */
+  private ordered = false;
 
   constructor(
     readonly name: string,
@@ -258,7 +262,7 @@ export class Groomer {
         this.park();
         return;
       }
-      const outOfTime = this.shift >= MAX_SHIFT_HOURS || !inWindow(schedule, hourOfDay);
+      const outOfTime = this.shift >= MAX_SHIFT_HOURS || (!this.ordered && !inWindow(schedule, hourOfDay));
       const next = outOfTime ? null : this.findWork(tracks, weather, now);
       if (next) {
         this.path = next;
@@ -291,15 +295,51 @@ export class Groomer {
       this.status = "Garasjen er ikke koblet til løypenettet";
       return;
     }
+    if (this.onCall) {
+      this.status = "I garasjen (på vent)";
+      return;
+    }
     if (!inWindow(schedule, hourOfDay)) {
       this.status = "I garasjen (venter på kvelden)";
       return;
     }
-    const needy = this.reachable(entry, tracks).filter(([x, y]) => tracks.needsGrooming(x, y, weather, now));
-    if (needy.length < MIN_JOB_TILES) {
+    if (this.needy(entry, tracks, weather, now) < MIN_JOB_TILES) {
       this.status = "I garasjen (alt er fint)";
       return;
     }
+    this.leave(entry);
+  }
+
+  private needy(entry: [number, number], tracks: TrackNetwork, weather: Weather, now: number): number {
+    return this.reachable(entry, tracks).filter(([x, y]) => tracks.needsGrooming(x, y, weather, now)).length;
+  }
+
+  /** Send the machine out now for one shift, day or night; the reason it stays home, or null once it is off. */
+  dispatch(tracks: TrackNetwork, weather: Weather, now: number): string | null {
+    if (this.state !== "home") {
+      return `${this.name} er allerede ute.`;
+    }
+    const entry = this.garage.entry(tracks);
+    if (!entry) {
+      return "Garasjen er ikke koblet til løypenettet.";
+    }
+    if (this.needy(entry, tracks, weather, now) === 0) {
+      return "Løypene er fine, det er ingenting å preppe.";
+    }
+    this.ordered = true;
+    this.leave(entry);
+    return null;
+  }
+
+  /** Call the machine home from wherever it is. */
+  recall(tracks: TrackNetwork) {
+    if (this.state === "grooming") {
+      this.status = "Kalt hjem, kjører til garasjen";
+      this.headHome(tracks);
+    }
+  }
+
+  private leave(entry: [number, number]) {
     this.state = "grooming";
     this.status = "Prepper";
     this.shift = 0;
@@ -370,6 +410,7 @@ export class Groomer {
 
   private park() {
     this.state = "home";
+    this.ordered = false;
     this.sprite.root.visible = false;
     this.px = this.garage.x + 0.6;
     this.py = this.garage.y + 0.5;

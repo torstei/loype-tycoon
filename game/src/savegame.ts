@@ -51,7 +51,8 @@ export interface SaveGame {
   rainSinceReport: number;
   weather: { snowDepth: number; highDepth?: number; plans: DayPlan[] };
   tracks: TrackRecord[];
-  garages: { tile: GridTile; totalGroomed: number }[];
+  /** onCall is absent in saves from before machines could be kept in the garage. */
+  garages: { tile: GridTile; totalGroomed: number; onCall?: boolean }[];
   schedule: "night" | "always";
   reports: SavedReport[];
   crew: GridTile;
