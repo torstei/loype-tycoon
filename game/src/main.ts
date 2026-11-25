@@ -35,6 +35,7 @@ import { applyRegion, capital, loadRegionFile, region } from "./region";
 import { OVERVIEW_PX, renderOverview } from "./overview";
 import { hash, landscapeFields, PX, renderChunk, renderLandscape } from "./render";
 import { LandscapeChunks } from "./chunks";
+import { greening } from "./melt";
 import { Flag, FLAG_NAMES, Terrain, TERRAIN_NAMES } from "./terrain";
 import { askCrossing } from "./crossing";
 import { Alpine, CHAIRLIFT_PRICE } from "./alpine";
@@ -211,10 +212,23 @@ async function main() {
   app.stage.addChild(world);
 
   await new Promise((r) => requestAnimationFrame(r));
-  const overviewCanvas = renderOverview(map);
+  const chunks = new LandscapeChunks(map);
+  const ground = () => ({ depthAt: weather.profile(), greenAt: greening(clock.day) });
+  chunks.setGround(ground());
+  const overviewSnow = () => (chunks.ground ? { ground: chunks.ground, need: chunks.fields.need, elev: chunks.fields.elev } : undefined);
+  let overviewCanvas = renderOverview(map, overviewSnow());
   const overview = new Sprite(Texture.from(overviewCanvas));
   overview.scale.set(PX / OVERVIEW_PX);
-  const chunks = new LandscapeChunks(map);
+  /** Draw the map again where the snow has melted or come back, or the grass greened, since it was last drawn. */
+  const followSnow = () => {
+    if (!chunks.setGround(ground())) {
+      return;
+    }
+    const old = overview.texture;
+    overviewCanvas = renderOverview(map, overviewSnow());
+    overview.texture = Texture.from(overviewCanvas);
+    old.destroy(true);
+  };
   const detail = chunks.layer;
   document.getElementById("loading")?.remove();
   showTouchTips();
@@ -331,7 +345,7 @@ async function main() {
   if (new URLSearchParams(location.search).has("debug")) {
     Object.assign(window, { loype: { map, world, camera, whimsy, alpine, tracks, clock, weather, fleet, crowd, skijorer, crew, chunks, render: { renderChunk, renderLandscape, landscapeFields }, reports: () => reports, paper: () => paper, kiosks: () => crowd.kiosks,
       fastForward: (hours: number, step?: number) => fastForward(hours, step), history: () => history,
-      cheat: { setBudget: (n: number) => (budget = n), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition(), photo: (x: number, y: number) => takePhoto(x, y), groundShot: (view: View) => groundShot(view), viewAlongTrack: (x: number, y: number, subject?: View["subject"]) => viewAlongTrack(x, y, subject), viewDownLift: () => viewDownLift(), viewIntoSun: (x: number, y: number, subject?: View["subject"]) => viewIntoSun(x, y, subject), post: (kind: PostKind, x?: number, y?: number, view?: View | null, road?: string) => post(kind, x === undefined ? null : [x, y!], { road }, view ?? null), feed: () => feed } });
+      cheat: { setBudget: (n: number) => (budget = n), setSnow: (valley: number, high = valley + 15) => ((weather.snowDepth = valley), (weather.highDepth = high)), buyKiosk: (tier: number) => placeKiosk(fleet.garages[0].x, fleet.garages[0].y, tier), buildCabin: (x: number, y: number, tier: number) => placeOutlet(x, y, tier, "cabin") }, publishEdition: () => publishEdition(), photo: (x: number, y: number) => takePhoto(x, y), groundShot: (view: View) => groundShot(view), viewAlongTrack: (x: number, y: number, subject?: View["subject"]) => viewAlongTrack(x, y, subject), viewDownLift: () => viewDownLift(), viewIntoSun: (x: number, y: number, subject?: View["subject"]) => viewIntoSun(x, y, subject), post: (kind: PostKind, x?: number, y?: number, view?: View | null, road?: string) => post(kind, x === undefined ? null : [x, y!], { road }, view ?? null), feed: () => feed } });
   }
   camera.centreOn((startPoi.x + 0.5) * PX, startPoi.y * PX, app.screen.width, app.screen.height);
 
@@ -471,6 +485,7 @@ async function main() {
       node.scale.set(s < 1 ? 1 / s : 1);
       node.visible = s >= OVERVIEW_BELOW || (kind !== "parking" && kind !== "cabin");
     }
+    followSnow();
     const tl = world.toLocal({ x: 0, y: 0 });
     const br = world.toLocal({ x: app.screen.width, y: app.screen.height });
     if (detail.visible) {

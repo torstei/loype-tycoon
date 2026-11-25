@@ -1,4 +1,5 @@
 import { GameMap, MapLine } from "./map";
+import { bareGround, blend, cover, Ground, meltNeed } from "./melt";
 import { Flag, Terrain } from "./terrain";
 import { MAX_SLOPE } from "./tracks";
 
@@ -52,6 +53,8 @@ export interface LandscapeFields {
   elev: Float32Array;
   /** Slope in percent, zero on graded roads. */
   slope: Float32Array;
+  /** Snow depth in cm each tile needs to stay white. */
+  need: Float32Array;
 }
 
 export function landscapeFields(map: GameMap): LandscapeFields {
@@ -59,14 +62,16 @@ export function landscapeFields(map: GameMap): LandscapeFields {
     shade: tileField(map, (x, y) => lightAt(map, x, y)),
     elev: tileField(map, (x, y) => map.elevationAt(x, y)),
     slope: tileField(map, (x, y) => (map.flags[map.index(x, y)] & GRADED ? 0 : map.slopeAt(x, y))),
+    need: meltNeed(map),
   };
 }
 
 /**
- * Draw the winter landscape for a rectangle of tiles. Everything random is keyed to global
- * pixel and tile positions, so neighbouring rectangles meet without seams.
+ * Draw the landscape for a rectangle of tiles, on the ground as it is under `ground`, or deep
+ * winter without it. Everything random is keyed to global pixel and tile positions, so
+ * neighbouring rectangles meet without seams.
  */
-export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeFields): HTMLCanvasElement {
+export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeFields, ground?: Ground): HTMLCanvasElement {
   const W = rect.w * PX;
   const H = rect.h * PX;
   const ox = rect.x * PX;
@@ -77,16 +82,23 @@ export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeF
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
 
   const cls = smoothTerrain(map, ctx, rect, PX);
-  const { shade, elev, slope } = fields;
+  const { shade, elev, slope, need } = fields;
 
   const img = ctx.createImageData(W, H);
   const d = img.data;
   const band = new Int16Array(W * H);
   const crag = new Float32Array(W * H);
+  const snowLeft = new Float32Array(W * H).fill(1);
+  const green = new Float32Array(W * H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      band[y * W + x] = Math.floor(sample(map, elev, ox + x, oy + y) / CONTOUR_M);
+      const e = sample(map, elev, ox + x, oy + y);
+      band[y * W + x] = Math.floor(e / CONTOUR_M);
       crag[y * W + x] = Math.min(1, Math.max(0, (sample(map, slope, ox + x, oy + y) - MAX_SLOPE + 4) / 8));
+      if (ground) {
+        snowLeft[y * W + x] = cover(ground.depthAt(e), sample(map, need, ox + x, oy + y), ox + x, oy + y);
+        green[y * W + x] = ground.greenAt(e);
+      }
     }
   }
 
@@ -106,7 +118,7 @@ export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeF
           if (edge(i, t, 1) || edge(i, t, 2)) {
             c = [84, 128, 180];
           } else if (edge(i, t, 3) || edge(i, t, 4)) {
-            c = [236, 244, 252];
+            c = snowLeft[i] < 0.66 ? [184, 214, 236] : [236, 244, 252];
           } else if ((x * 2 - y + 400) % 41 < 2 && hash(x >> 4, y >> 4, 5) < 0.35) {
             c = [232, 244, 252];
           } else {
@@ -132,6 +144,9 @@ export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeF
           c = mix(c, 0.97);
           break;
       }
+      if (snowLeft[i] < 1 && t !== Terrain.Water) {
+        c = blend(c, bareGround(t, x, y, s, green[i]), snowLeft[i]);
+      }
       if (t !== Terrain.Water && (band[i] !== band[i + 1] || band[i] !== band[i + W])) {
         c = mix(c, 0.9);
       }
@@ -153,7 +168,7 @@ export function renderLandscape(map: GameMap, rect: TileRect, fields: LandscapeF
   ctx.translate(-ox, -oy);
   drawSlopes(map, ctx, rect, fields.slope);
   drawLines(map, ctx, LINE_STYLES, PX, rect);
-  drawSprites(map, ctx, cls, rect, fields.slope);
+  drawSprites(map, ctx, cls, rect, fields, ground);
   ctx.restore();
   return canvas;
 }
@@ -206,7 +221,7 @@ export const CHUNK = 50;
 const CHUNK_MARGIN = 2;
 
 /** Draw one chunk of the detailed landscape: a CHUNK×CHUNK block of tiles (smaller at the map edge). */
-export function renderChunk(map: GameMap, cx: number, cy: number, fields: LandscapeFields): HTMLCanvasElement {
+export function renderChunk(map: GameMap, cx: number, cy: number, fields: LandscapeFields, ground?: Ground): HTMLCanvasElement {
   const x0 = cx * CHUNK;
   const y0 = cy * CHUNK;
   const w = Math.min(CHUNK, map.width - x0);
@@ -219,7 +234,7 @@ export function renderChunk(map: GameMap, cx: number, cy: number, fields: Landsc
     w: Math.min(map.width, x0 + w + CHUNK_MARGIN) - rx,
     h: Math.min(map.height, y0 + h + CHUNK_MARGIN) - ry,
   };
-  const region = renderLandscape(map, rect, fields);
+  const region = renderLandscape(map, rect, fields, ground);
   const out = document.createElement("canvas");
   out.width = w * PX;
   out.height = h * PX;
@@ -409,7 +424,7 @@ export function sprite(w: number, h: number, draw: (g: CanvasRenderingContext2D)
   return c;
 }
 
-export function spruce(height: number, green: string): HTMLCanvasElement {
+export function spruce(height: number, green: string, snowy = true): HTMLCanvasElement {
   const w = Math.ceil(height * 0.8) + 4;
   const h = Math.ceil(height) + 4;
   return sprite(w, h, (g) => {
@@ -437,13 +452,13 @@ export function spruce(height: number, green: string): HTMLCanvasElement {
       g.lineTo(cx - half * 0.85, bottom - 0.8);
       g.quadraticCurveTo(cx - half * 0.2, bottom - 2.5, cx + half * 0.35, bottom - (bottom - top) * 0.35);
       g.closePath();
-      g.fillStyle = "#f6f9fd";
+      g.fillStyle = snowy ? "#f6f9fd" : "rgba(150, 190, 120, 0.45)";
       g.fill();
     }
   });
 }
 
-export function house(wall: string): HTMLCanvasElement {
+export function house(wall: string, roof = "#fbfdff"): HTMLCanvasElement {
   return sprite(14, 14, (g) => {
     g.lineJoin = "round";
     g.lineWidth = 1;
@@ -462,7 +477,7 @@ export function house(wall: string): HTMLCanvasElement {
     g.lineTo(11, 1.5);
     g.lineTo(14, 7);
     g.closePath();
-    g.fillStyle = "#fbfdff";
+    g.fillStyle = roof;
     g.fill();
     g.strokeStyle = "#5b6270";
     g.stroke();
@@ -474,18 +489,20 @@ export function house(wall: string): HTMLCanvasElement {
   });
 }
 
-const boulder = sprite(9, 7, (g) => {
-  g.beginPath();
-  g.ellipse(4.5, 4, 4, 2.8, 0, 0, Math.PI * 2);
-  g.fillStyle = "#8d93a1";
-  g.fill();
-  g.strokeStyle = "#4d5260";
-  g.stroke();
-  g.beginPath();
-  g.ellipse(3.8, 2.6, 2.6, 1.3, 0, 0, Math.PI * 2);
-  g.fillStyle = "#f6f9fd";
-  g.fill();
-});
+const boulder = (cap: string) =>
+  sprite(9, 7, (g) => {
+    g.beginPath();
+    g.ellipse(4.5, 4, 4, 2.8, 0, 0, Math.PI * 2);
+    g.fillStyle = "#8d93a1";
+    g.fill();
+    g.strokeStyle = "#4d5260";
+    g.stroke();
+    g.beginPath();
+    g.ellipse(3.8, 2.6, 2.6, 1.3, 0, 0, Math.PI * 2);
+    g.fillStyle = cap;
+    g.fill();
+  });
+const BOULDERS = { snowy: boulder("#f6f9fd"), bare: boulder("#a3a99a") };
 
 /** A jagged, snow-capped crag, for ground too steep for the snowcat. */
 function crag(w: number, h: number, peaks: number, seed: number): HTMLCanvasElement {
@@ -555,17 +572,21 @@ const tuft = sprite(5, 5, (g) => {
   g.stroke();
 });
 
-const TREES = [12, 14, 16, 18].flatMap((h) => ["#2f6a4c", "#285c43", "#356f4a"].map((c) => spruce(h, c)));
+const treesOf = (snowy: boolean) => [12, 14, 16, 18].flatMap((h) => ["#2f6a4c", "#285c43", "#356f4a"].map((c) => spruce(h, c, snowy)));
+const TREES = { snowy: treesOf(true), bare: treesOf(false) };
 /** Where the house on a building tile stands: left edge and ground line, in pixels. */
 export function housePosition(tx: number, ty: number): { x: number; y: number } {
   return { x: tx * PX + 1 + hash(tx, ty, 3) * 3, y: ty * PX + 13 + hash(tx, ty, 4) * 2 };
 }
 
-const HOUSES = ["#b8433a", "#b8433a", "#c9a045", "#eef0f0", "#8a3b34"].map(house);
+const WALLS = ["#b8433a", "#b8433a", "#c9a045", "#eef0f0", "#8a3b34"];
+const ROOFS = ["#4a4a50", "#6b3a30", "#4a4a50", "#5a5048", "#3e4048"];
+const HOUSES = { snowy: WALLS.map((w) => house(w)), bare: WALLS.map((w, i) => house(w, ROOFS[i])) };
 const NO_TREES = Flag.Road | Flag.Rail | Flag.Building | Flag.ForestRoad;
 
 /** Trees, houses, boulders and tufts for a rectangle, drawn in global pixel coordinates. */
-function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array, rect: TileRect, slope: Float32Array) {
+function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array, rect: TileRect, fields: LandscapeFields, ground?: Ground) {
+  const { slope, elev, need } = fields;
   const W = rect.w * PX;
   const H = rect.h * PX;
   const items: { x: number; y: number; img: HTMLCanvasElement; shadow: number }[] = [];
@@ -573,8 +594,9 @@ function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Arra
     for (let tx = rect.x; tx < rect.x + rect.w; tx++) {
       const flags = map.flags[map.index(tx, ty)];
       const t = map.terrainAt(tx, ty);
+      const look = ground && ground.depthAt(elev[map.index(tx, ty)]) < need[map.index(tx, ty)] ? "bare" : "snowy";
       if (flags & Flag.Building && !(flags & Flag.Road)) {
-        const img = HOUSES[Math.floor(hash(tx, ty, 5) * HOUSES.length)];
+        const img = HOUSES[look][Math.floor(hash(tx, ty, 5) * WALLS.length)];
         items.push({ ...housePosition(tx, ty), img, shadow: 6 });
         continue;
       }
@@ -595,11 +617,11 @@ function drawSprites(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Arra
           if (lx < 0 || ly < 0 || lx >= W || ly >= H || cls[ly * W + lx] !== Terrain.Forest) {
             continue;
           }
-          const img = TREES[Math.floor(hash(tx, ty, 30 + k) * TREES.length)];
+          const img = TREES[look][Math.floor(hash(tx, ty, 30 + k) * TREES.snowy.length)];
           items.push({ x: x - img.width / 2, y, img, shadow: img.width * 0.45 });
         }
       } else if (t === Terrain.Rock && hash(tx, ty, 40) < 0.6) {
-        items.push({ x: tx * PX + 3 + hash(tx, ty, 41) * 6, y: ty * PX + 8 + hash(tx, ty, 42) * 6, img: boulder, shadow: 4 });
+        items.push({ x: tx * PX + 3 + hash(tx, ty, 41) * 6, y: ty * PX + 8 + hash(tx, ty, 42) * 6, img: BOULDERS[look], shadow: 4 });
       } else if (t === Terrain.Bog) {
         for (let k = 0; k < 3; k++) {
           if (hash(tx, ty, 50 + k) < 0.6) {

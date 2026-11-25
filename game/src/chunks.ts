@@ -1,5 +1,6 @@
 import { Container, Sprite, Texture } from "pixi.js";
 import { GameMap } from "./map";
+import { Ground, snowKey } from "./melt";
 import { CHUNK, landscapeFields, LandscapeFields, PX, renderChunk } from "./render";
 
 /** Chunks kept drawn at once; each is 800×800 px, so this caps the landscape at about 100 MB. */
@@ -8,11 +9,18 @@ const MAX_CHUNKS = 40;
 /**
  * The detailed landscape, drawn chunk by chunk as it comes into view and forgotten again when
  * it has been out of view the longest. The overview map underneath stands in until a chunk is ready.
+ * When the snow changes enough to show, chunks in view are drawn again one by one, each staying
+ * as it was until its new drawing replaces it.
  */
 export class LandscapeChunks {
   readonly layer = new Container();
   readonly fields: LandscapeFields;
-  private readonly chunks = new Map<string, { sprite: Sprite; used: number }>();
+  private readonly chunks = new Map<string, { sprite: Sprite; used: number; snow: string }>();
+  private current: Ground | undefined;
+  private snow = "vinter";
+  private readonly lowest: number;
+  private readonly highest: number;
+  private readonly deepestNeed: number;
   private frame = 0;
   private readonly cols: number;
   private readonly rows: number;
@@ -21,6 +29,39 @@ export class LandscapeChunks {
     this.fields = landscapeFields(map);
     this.cols = Math.ceil(map.width / CHUNK);
     this.rows = Math.ceil(map.height / CHUNK);
+    let lowest = Infinity;
+    let highest = -Infinity;
+    for (const e of map.elevation) {
+      lowest = Math.min(lowest, e);
+      highest = Math.max(highest, e);
+    }
+    this.lowest = lowest;
+    this.highest = highest;
+    this.deepestNeed = this.fields.need.reduce((a, b) => Math.max(a, b), -Infinity);
+  }
+
+  /**
+   * Follow the snow and the new grass, given as fixed profiles, so chunks drawn later under the
+   * same key match those drawn earlier. Returns whether it now looks different from before.
+   */
+  setGround(ground: Ground): boolean {
+    const key = this.snowKey(ground);
+    if (key === this.snow) {
+      return false;
+    }
+    this.snow = key;
+    this.current = key === "vinter" ? undefined : ground;
+    return true;
+  }
+
+  /** What the ground looks like: the same key means the same drawing. */
+  snowKey(ground: Ground): string {
+    return snowKey(ground, this.lowest, this.highest, this.deepestNeed);
+  }
+
+  /** The ground the chunks are drawn for, or nothing in deep winter. */
+  get ground(): Ground | undefined {
+    return this.current;
   }
 
   /** Make sure the chunks covering a world-pixel rectangle are drawn, a few per frame. */
@@ -39,7 +80,8 @@ export class LandscapeChunks {
         const c = this.chunks.get(`${cx},${cy}`);
         if (c) {
           c.used = this.frame;
-        } else {
+        }
+        if (!c || c.snow !== this.snow) {
           missing.push([cx, cy]);
         }
       }
@@ -60,7 +102,7 @@ export class LandscapeChunks {
   drawAll() {
     for (let cy = 0; cy < this.rows; cy++) {
       for (let cx = 0; cx < this.cols; cx++) {
-        if (!this.chunks.has(`${cx},${cy}`)) {
+        if (this.chunks.get(`${cx},${cy}`)?.snow !== this.snow) {
           this.draw(cx, cy);
         }
       }
@@ -72,10 +114,12 @@ export class LandscapeChunks {
   }
 
   private draw(cx: number, cy: number) {
-    const sprite = new Sprite(Texture.from(renderChunk(this.map, cx, cy, this.fields)));
+    const key = `${cx},${cy}`;
+    const sprite = new Sprite(Texture.from(renderChunk(this.map, cx, cy, this.fields, this.current)));
     sprite.position.set(cx * CHUNK * PX, cy * CHUNK * PX);
     this.layer.addChild(sprite);
-    this.chunks.set(`${cx},${cy}`, { sprite, used: this.frame });
+    this.chunks.get(key)?.sprite.destroy({ texture: true, textureSource: true });
+    this.chunks.set(key, { sprite, used: this.frame, snow: this.snow });
   }
 
   private evict() {
