@@ -40,7 +40,7 @@ import { GroundShot, groundPhoto, sunDirection } from "./groundphoto";
 import { nightLights, streetLamps } from "./lights";
 import { Julehus, JULEHUS, LIGHTS_DOWN_DAY } from "./christmas";
 import { AlbumPhoto, albumHtml, keepInAlbum, seasonMap } from "./album";
-import { feedHtml, GROUP_NAME, Post, PostKind, writePost } from "./feed";
+import { feedHtml, GROUP_NAME, personName, Post, PostKind, writePost } from "./feed";
 import { cameraHtml, inspectHtml, LIVE_PACES, snapHtml, zoomLabel } from "./inspect";
 import { findRoute, RouteGround } from "./route";
 import { Condition, CONDITION_NAMES, Crossing, CROSSING_NAMES, CrossingOption, crossingOptions, lineTiles, MIN_GROOMING_DEPTH, Obstacle, RAIL_LEVEL_CROSSING, roadTraffic, TILLER_DEPTH, TrackNetwork } from "./tracks";
@@ -608,9 +608,15 @@ async function main() {
         <button id="schedule">${fleet.schedule === "night" ? "🌙 Prepper om natta" : "🕑 Prepper døgnet rundt"}</button></div>
       ${fleet.groomers.map((g, i) => {
         const k = kioskAt(g.garage.x, g.garage.y);
+        const drive = g.state === "home"
+          ? `<button class="drive" data-drive="${i}" title="Send ${g.name} ut nå, uansett tid på døgnet">▶ Kjør ut</button>`
+          : g.state === "grooming" ? `<button class="drive" data-drive="${i}" title="Kall ${g.name} hjem og spar diesel">⏹ Hjem</button>` : "";
         return `<div class="row"><span class="name">🚜 ${g.name}</span> ${g.status}
+          <span class="buttons">
+          <button class="mode${g.onCall ? " on" : ""}" data-oncall="${i}" title="${g.onCall ? `${g.name} står i garasjen til du sender den ut. Klikk for å la den kjøre selv.` : `${g.name} kjører selv når løypene trenger det. Klikk for å la den stå til du sender den ut.`}">${g.onCall ? "✋ På vent" : "🔁 Auto"}</button>
+          ${drive}
           <button class="goto" data-goto="${i}" title="Vis ${g.name} på kartet">Gå til</button>
-          <button class="kiosk" data-kiosk="${i}" title="Vaffelsalg ved garasjen">🧇 ${k ? `${k.spec.short}${k.broken ? " (i ustand)" : ""}` : "Vaffelsalg?"}</button></div>`;
+          <button class="kiosk" data-kiosk="${i}" title="Vaffelsalg ved garasjen">🧇 ${k ? `${k.spec.short}${k.broken ? " (i ustand)" : ""}` : "Vaffelsalg?"}</button></span></div>`;
       }).join("")}
       ${kiosks.filter((k) => k.kind === "cabin").map((k) => `<div class="row"><span class="name">🛖 ${k.title}</span> ${k.spec.short}${k.spec.rooms ? ` · 🛏 ${k.guestsLastNight}` : ""}
           <button class="kiosk" data-cabin="${k.x},${k.y}">Åpne</button></div>`).join("")}`;
@@ -619,6 +625,25 @@ async function main() {
     const gotoButton = (e.target as HTMLElement).closest<HTMLElement>("[data-goto]");
     if (gotoButton) {
       goToGroomer(fleet.groomers[Number(gotoButton.dataset.goto)]);
+      return;
+    }
+    const modeButton = (e.target as HTMLElement).closest<HTMLElement>("[data-oncall]");
+    if (modeButton) {
+      const g = fleet.groomers[Number(modeButton.dataset.oncall)];
+      g.onCall = !g.onCall;
+      refreshHud();
+      return;
+    }
+    const driveButton = (e.target as HTMLElement).closest<HTMLElement>("[data-drive]");
+    if (driveButton) {
+      const g = fleet.groomers[Number(driveButton.dataset.drive)];
+      if (g.state === "home") {
+        const refused = g.dispatch(tracks, weather, clock.hours);
+        showToast(refused ? `🚜 ${refused}` : `🚜 ${g.name} kjører ut.`);
+      } else {
+        g.recall(tracks);
+      }
+      refreshHud();
       return;
     }
     const kioskButton = (e.target as HTMLElement).closest<HTMLElement>("[data-kiosk]");
@@ -1402,7 +1427,7 @@ async function main() {
   /** Posts kept, and how many of the newest keep their photo; old photos would fill the save. */
   const FEED_KEPT = 30;
   const FEED_PHOTOS = 10;
-  const post = (kind: PostKind, at: [number, number] | null, extra: { km?: number; waffles?: number; driver?: string; road?: string; subject?: string } = {}, view: View | null = null) => {
+  const post = (kind: PostKind, at: [number, number] | null, extra: { km?: number; waffles?: number; driver?: string; road?: string; subject?: string; author?: string } = {}, view: View | null = null) => {
     const [x, y] = at ?? [startPoi.x, startPoi.y];
     const p = writePost(kind, {
       day: clock.day,
@@ -1415,6 +1440,7 @@ async function main() {
       waffles: extra.waffles,
       road: extra.road,
       subject: extra.subject,
+      author: extra.author,
     }, view ? groundShot(view) : at ? takePhoto(x, y) : null, Math.floor(clock.hours * 7.3) + feed.length);
     feed.push(p);
     if (p.photo && at) {
@@ -1591,6 +1617,23 @@ async function main() {
   const subjectLabel = (s: Subject): string =>
     s.kind === "skier" ? `${s.skier.kind.name === "søndagsfamilie" ? "søndagsfamilien" : `${s.skier.kind.name}en`}` : s.kind === "snowcat" ? "løypemaskina" : "toget";
 
+  /** The train on the map stands for a new departure every other game hour. */
+  const trainSeed = () => Math.floor(clock.hours / 2);
+
+  /** Who shares the picture: the snowcat's or train's driver from the cab, the skier for the view, and a passer-by for a picture of something. */
+  const photographer = (s: Subject, mode: PhotoMode): [PostKind, { driver?: string; author?: string; subject?: string }] => {
+    if (mode === "of") {
+      return ["skiershot", { subject: subjectLabel(s) }];
+    }
+    if (s.kind === "snowcat") {
+      return ["snapshot", { driver: s.groomer.name }];
+    }
+    if (s.kind === "train") {
+      return ["trainshot", { author: `${personName(trainSeed())} · lokfører` }];
+    }
+    return ["skiershot", { author: personName(s.skier.seed) }];
+  };
+
   const subjectShape = (s: Subject, at: [number, number]): NonNullable<View["subject"]> => {
     if (s.kind === "skier") {
       return { kind: "skier", x: at[0], y: at[1], colour: s.skier.jacket };
@@ -1706,7 +1749,7 @@ async function main() {
       const g = inspected.groomer;
       inspectPanel.innerHTML = inspectHtml({ kind: "snowcat", name: g.name, status: g.status, tonightKm: (g.groomedTonight * map.tileSize) / 1000, totalKm: (g.totalGroomed * map.tileSize) / 1000 });
     } else {
-      inspectPanel.innerHTML = inspectHtml({ kind: "train", seed: Math.floor(clock.hours / 2) });
+      inspectPanel.innerHTML = inspectHtml({ kind: "train", seed: trainSeed() });
     }
     inspectPanel.hidden = false;
   };
@@ -1920,7 +1963,8 @@ async function main() {
       const view = photoView();
       const at = subjectAt(inspected);
       if (view && at) {
-        post("snapshot", [Math.floor(at[0]), Math.floor(at[1])], { subject: shooting.mode === "of" ? subjectLabel(inspected) : undefined }, view);
+        const [kind, extra] = photographer(inspected, shooting.mode);
+        post(kind, [Math.floor(at[0]), Math.floor(at[1])], extra, view);
         shooting.shared = true;
         showToast("📱 Bildet er delt i gruppa.");
         renderInspect();
@@ -3685,7 +3729,7 @@ async function main() {
     rainSinceReport,
     weather: { snowDepth: weather.snowDepth, highDepth: weather.highDepth, plans: weather.allPlans() },
     tracks: encodeTracks(map, tracks),
-    garages: fleet.groomers.map((g) => ({ tile: map.toGrid(g.garage.x, g.garage.y), totalGroomed: g.totalGroomed })),
+    garages: fleet.groomers.map((g) => ({ tile: map.toGrid(g.garage.x, g.garage.y), totalGroomed: g.totalGroomed, onCall: g.onCall })),
     kiosks: kiosks.map((k) => ({ tile: map.toGrid(k.x, k.y), tier: k.tier, soldToday: k.soldToday, broken: k.broken, experts: k.experts, kind: k.kind, name: k.name })),
     schedule: fleet.schedule,
     reports: reports.map(({ report, rosy }) => ({ ...report, rosyChosen: rosy })),
@@ -3733,7 +3777,9 @@ async function main() {
     for (const g of save.garages) {
       const local = map.fromGrid(g.tile);
       if (local) {
-        fleet.place(...local).totalGroomed = g.totalGroomed;
+        const groomer = fleet.place(...local);
+        groomer.totalGroomed = g.totalGroomed;
+        groomer.onCall = g.onCall ?? false;
       }
     }
     fleet.schedule = save.schedule;

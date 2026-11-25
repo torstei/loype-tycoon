@@ -87,6 +87,9 @@ Controls (press `H` in the game for the full list):
 - **Grooming**: tool `4` places another garage next to the track, with a new machine
   (80 000 kr). Machines go out when tracks need it (by default only at night),
   groom their way round the network and drive home. Diesel is paid per tile groomed.
+  Under Løypemaskiner, 🔁 Auto / ✋ På vent switches a machine between going out by itself
+  and staying in the garage to save diesel; ▶ Kjør ut sends it out for one shift at any
+  hour, and ⏹ Hjem calls it back.
 - **Grooming map**: `G` (or 🕑 Sist preppet) colours every stretch by how long since a
   snowcat was last along it — under 6 hours, 6–24 hours, 1–3 days, over 3 days, never.
 - `+`/`-` or PageUp/PageDown zoom (the outermost two levels show the overview map); arrow
