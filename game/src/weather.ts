@@ -1,4 +1,5 @@
 import { MAX_SEASON_DAYS } from "./clock";
+import { SnowDepth } from "./melt";
 import { neighbourhood, region } from "./region";
 
 // The weather is for the region's valley floor; a second snowpack higher up is colder, so more snow and a later melt.
@@ -38,6 +39,12 @@ function rng(seed: number) {
 function normalMean(day: number): number {
   return -1.5 - 5 * Math.sin(Math.PI * Math.min(1, Math.max(0, (day + 8) / 128))) + Math.max(0, day - 120) * 0.19;
 }
+
+/** Snow depth by elevation, between the valley's snowpack and the one higher up. */
+const depthProfile = (valleyDepth: number, highDepth: number): SnowDepth => (elevation) => {
+  const k = (elevation - region.climate.valley) / (region.climate.high - region.climate.valley);
+  return Math.max(0, valleyDepth + (highDepth - valleyDepth) * k);
+};
 
 const spring = (day: number) => Math.min(1, Math.max(0, (day - 80) / 50));
 
@@ -153,8 +160,12 @@ export class Weather {
   }
 
   snowDepthAt(elevation: number): number {
-    const k = (elevation - region.climate.valley) / (region.climate.high - region.climate.valley);
-    return Math.max(0, this.snowDepth + (this.highDepth - this.snowDepth) * k);
+    return depthProfile(this.snowDepth, this.highDepth)(elevation);
+  }
+
+  /** Snow depth by elevation as it is now, left unchanged as the weather goes on. */
+  profile(): SnowDepth {
+    return depthProfile(this.snowDepth, this.highDepth);
   }
 
   /** Advance the snowpack. Returns snowfall (cm) and rain (mm) at the reference elevation. */

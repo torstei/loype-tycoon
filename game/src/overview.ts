@@ -1,4 +1,5 @@
 import { GameMap, MapLine } from "./map";
+import { bareGround, blend, cover, Ground } from "./melt";
 import { downhill, drawLines, hash, house, lightAt, mix, RGB, sample, smoothTerrain, snow, spruce, Stroke, tileField } from "./render";
 import { Flag, Terrain } from "./terrain";
 import { MAX_SLOPE } from "./tracks";
@@ -33,8 +34,28 @@ const OVERVIEW_LINES: [MapLine["kind"], Stroke[]][] = [
   ]],
 ];
 
-/** A board-game style map of the whole region: blobs, fat roads and big icons instead of detail. */
-export function renderOverview(map: GameMap): HTMLCanvasElement {
+const bases = new WeakMap<GameMap, { cls: Uint8Array; shade: Float32Array; slope: Float32Array }>();
+
+/** What the overview is drawn from that never changes, worked out once per map since the snow redraws it. */
+function overviewBase(map: GameMap, ctx: CanvasRenderingContext2D) {
+  let base = bases.get(map);
+  if (!base) {
+    base = {
+      // A softer blur than the detail view: the overview wants rounded blobs, not field edges.
+      cls: smoothTerrain(map, ctx, { x: 0, y: 0, w: map.width, h: map.height }, OVERVIEW_PX, OVERVIEW_PX * 1.6 * 0.35),
+      shade: tileField(map, (x, y) => lightAt(map, x, y)),
+      slope: tileField(map, (x, y) => (map.flags[map.index(x, y)] & (Flag.Road | Flag.ForestRoad) ? 0 : map.slopeAt(x, y))),
+    };
+    bases.set(map, base);
+  }
+  return base;
+}
+
+/**
+ * A board-game style map of the whole region: blobs, fat roads and big icons instead of detail.
+ * With `melt`, the ground shows through where it has melted; `need` is each tile's depth to stay white.
+ */
+export function renderOverview(map: GameMap, melt?: { ground: Ground; need: Float32Array; elev: Float32Array }): HTMLCanvasElement {
   const px = OVERVIEW_PX;
   const W = map.width * px;
   const H = map.height * px;
@@ -42,10 +63,7 @@ export function renderOverview(map: GameMap): HTMLCanvasElement {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-  // A softer blur than the detail view: the overview wants rounded blobs, not field edges.
-  const cls = smoothTerrain(map, ctx, { x: 0, y: 0, w: map.width, h: map.height }, px, px * 1.6 * 0.35);
-  const shade = tileField(map, (x, y) => lightAt(map, x, y));
-  const slope = tileField(map, (x, y) => (map.flags[map.index(x, y)] & (Flag.Road | Flag.ForestRoad) ? 0 : map.slopeAt(x, y)));
+  const { cls, shade, slope } = overviewBase(map, ctx);
 
   const img = ctx.createImageData(W, H);
   for (let y = 1; y < H - 1; y++) {
@@ -66,6 +84,13 @@ export function renderOverview(map: GameMap): HTMLCanvasElement {
         const base = snow(s);
         c = [base[0] * tint[0], base[1] * tint[1], base[2] * tint[2]];
       }
+      if (melt && t !== Terrain.Water && !(edge && OUTLINE[t])) {
+        const e = sample(map, melt.elev, x, y, px);
+        const left = cover(melt.ground.depthAt(e), sample(map, melt.need, x, y, px), x * 4, y * 4);
+        if (left < 1) {
+          c = t === Terrain.Forest ? (left < 0.5 ? mix(FOREST, Math.max(0.7, Math.min(1.15, s))) : c) : blend(c, bareGround(t, x * 4, y * 4, s, melt.ground.greenAt(e)), left);
+        }
+      }
       const steep = Math.min(1, Math.max(0, (sample(map, slope, x, y, px) - MAX_SLOPE + 4) / 8));
       if (steep > 0 && t !== Terrain.Water && t !== Terrain.Built) {
         const rock = mix([146, 160, 190], Math.min(1.1, s));
@@ -78,7 +103,8 @@ export function renderOverview(map: GameMap): HTMLCanvasElement {
   ctx.putImageData(img, 0, 0);
   drawFallLines(map, ctx, slope, px);
   drawLines(map, ctx, OVERVIEW_LINES, px);
-  stampIcons(map, ctx, cls, W, H, slope);
+  const bare = melt ? (tx: number, ty: number) => melt.ground.depthAt(melt.elev[map.index(tx, ty)]) < melt.need[map.index(tx, ty)] : () => false;
+  stampIcons(map, ctx, cls, W, H, slope, bare);
   return canvas;
 }
 
@@ -112,9 +138,11 @@ function drawFallLines(map: GameMap, ctx: CanvasRenderingContext2D, slope: Float
   ctx.stroke(ridges);
 }
 
-function stampIcons(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array, W: number, H: number, slope: Float32Array) {
+function stampIcons(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array, W: number, H: number, slope: Float32Array, bare: (tx: number, ty: number) => boolean) {
   const trees = [9, 11].map((h) => spruce(h, "#2f6a4c"));
-  const houses = ["#b8433a", "#c9a045"].map(house);
+  const bareTrees = [9, 11].map((h) => spruce(h, "#2f6a4c", false));
+  const houses = ["#b8433a", "#c9a045"].map((w) => house(w));
+  const bareHouses = ["#b8433a", "#c9a045"].map((w) => house(w, "#4a4a50"));
   const icons: { x: number; y: number; img: HTMLCanvasElement; w: number; h: number }[] = [];
   const clear = (x: number, y: number, r: number, t: Terrain) => {
     for (const [dx, dy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
@@ -135,11 +163,11 @@ function stampIcons(map: GameMap, ctx: CanvasRenderingContext2D, cls: Uint8Array
       const ty = Math.floor(y / OVERVIEW_PX);
       const steep = map.inside(tx, ty) && slope[map.index(tx, ty)] > MAX_SLOPE;
       if (!steep && clear(x, y, 5, Terrain.Forest) && hash(gx, gy, 3) < 0.55) {
-        const img = trees[hash(gx, gy, 4) < 0.5 ? 0 : 1];
+        const img = (map.inside(tx, ty) && bare(tx, ty) ? bareTrees : trees)[hash(gx, gy, 4) < 0.5 ? 0 : 1];
         icons.push({ x: x - img.width / 2, y, img, w: img.width, h: img.height });
       }
       if (map.inside(tx, ty) && map.has(tx, ty, Flag.Building) && hash(gx, gy, 5) < 0.7) {
-        const img = houses[hash(gx, gy, 6) < 0.6 ? 0 : 1];
+        const img = (bare(tx, ty) ? bareHouses : houses)[hash(gx, gy, 6) < 0.6 ? 0 : 1];
         icons.push({ x: x - 5, y, img, w: 10, h: 10 });
       }
     }
