@@ -184,7 +184,9 @@ post every few hours, and the same kind of post only every few days.
 From 1 March, the season ends on the first night when hardly any track has snow left to ski on,
 and on 31 May at the latest. A valley-floor network usually closes in early April; track on high
 ground, or a snowy winter, can last into May. Varingen then prints a season edition: the winter in
-numbers, the best and worst front pages, and a goodbye to the snow. Next comes the club's annual
+numbers, the best and worst front pages, and a goodbye to the snow. "Sesongen i bilder" follows:
+the network on the map, with the season's most liked photos from the local group pinned next to
+the spots where they were taken. Next comes the club's annual
 meeting, with the year's report, the accounts, a vote on letting the board off the hook (easy
 after a good winter, a long debate after a poor one), a prize and any other business.
 

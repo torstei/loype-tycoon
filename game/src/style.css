@@ -366,3 +366,14 @@ html.compact #accounts { width: calc(100vw - 16px); font-size: 13px; padding: 10
 #feed .comment { background: #f0f2f5; border-radius: 12px; padding: 5px 10px; margin: 4px 0; font-size: 13px; width: fit-content; max-width: 100%; }
 #feed .empty { text-align: center; color: #65676b; margin: 30px 0; }
 html.compact #feed { left: 12px; right: 12px; width: auto; top: 12px; max-height: calc(100dvh - 24px); }
+
+#season.wide { width: min(1040px, calc(100vw - 32px)); max-height: calc(100vh - 40px); }
+#season .album-map { display: block; width: 100%; height: auto; max-height: calc(100vh - 210px); margin: 6px 0; }
+#season .album-map .string { stroke: #6b2108; stroke-width: 2.5; }
+#season .album-map .pin { fill: #e8591a; stroke: #fff; stroke-width: 3; }
+#season .album-map .frame { fill: #fffdf8; stroke: #c9ced6; stroke-width: 1; filter: drop-shadow(2px 4px 4px rgba(0, 0, 0, 0.35)); }
+#season .album-map .tack { fill: #d23a2a; stroke: #7a1d12; stroke-width: 1; }
+#season .album-map .thumb { cursor: zoom-in; }
+#season figure { margin: 8px 0; cursor: zoom-out; }
+#season figure img { display: block; width: 100%; border-radius: 6px; }
+#season figure figcaption { font-size: 13px; color: #3d4f63; margin-top: 4px; }
