@@ -698,6 +698,7 @@ async function main() {
     }
     const cabins = kiosks.filter((k) => k.kind === "cabin");
     const lift = alpine.mainLift;
+    const atGrade = crossingsAtGrade();
     const tap = touchOnly() ? "trykk" : "klikk";
     const tab = (which: FleetTab, label: string) =>
       `<button class="tab${fleetTab === which ? " on" : ""}" data-tab="${which}">${label}</button>`;
@@ -729,10 +730,12 @@ async function main() {
         return `<div class="row"><span class="name">🚡 ${l.name}</span> ${l.chair ? "stolheis" : "skitrekk, kan bli stolheis"}
           <span class="buttons">${goTo(lx, ly, l.name)}<button class="kiosk" data-lift="${l.name}">Åpne</button></span></div>`;
       }),
+      ...atGrade.map((c) => `<div class="row"><span class="name">🚸 Rett over ${c.name}</span> ${c.tiles} rute${c.tiles === 1 ? "" : "r"}
+          <span class="buttons">${goTo(c.x, c.y, "kryssingen")}<button class="kiosk" data-crossing="${c.x},${c.y}">Bygg om</button></span></div>`),
       `<div class="row none">Nye garasjer og hytter bygges med byggeverktøyene.</div>`,
     ];
     const head = `
-        <span class="tabs">${tab("vehicles", `🚜 Kjøretøy (${fleet.groomers.length})`)}${tab("buildings", `🏠 Bygninger (${fleet.garages.length + cabins.length + (lift ? 1 : 0)})`)}</span>
+        <span class="tabs">${tab("vehicles", `🚜 Kjøretøy (${fleet.groomers.length})`)}${tab("buildings", `🏠 Bygninger (${fleet.garages.length + cabins.length + (lift ? 1 : 0) + atGrade.length})`)}</span>
         ${fleetTab === "vehicles" ? `<button id="schedule">${fleet.schedule === "night" ? "🌙 Om natta" : "🕑 Døgnet rundt"}</button>` : ""}
         <button class="fold" data-close title="Lukk (L)">✕</button>`;
     if (!fleetPanel.querySelector(".list")) {
@@ -803,6 +806,12 @@ async function main() {
     if (atButton) {
       const [x, y] = atButton.dataset.at!.split(",").map(Number);
       camera.frame((x + 0.5) * PX, (y + 0.5) * PX, app.screen.width / 2, app.screen.height / 2, GOTO_ZOOM_LEVEL);
+      return;
+    }
+    const crossingButton = (e.target as HTMLElement).closest<HTMLElement>("[data-crossing]");
+    if (crossingButton) {
+      const [x, y] = crossingButton.dataset.crossing!.split(",").map(Number);
+      rebuildCrossing(x, y);
       return;
     }
     const liftButton = (e.target as HTMLElement).closest<HTMLElement>("[data-lift]");
@@ -2765,7 +2774,9 @@ async function main() {
       const since = clock.hours - tracks.groomedAt[i];
       const groomed = Number.isFinite(since) ? `preppet for ${since < 1 ? "under en time" : `${Math.floor(since)} t`} siden` : "aldri preppet";
       const crossing = tracks.crossing[i] as Crossing;
-      action = `${crossing !== Crossing.None ? `🌉 ${CROSSING_NAMES[crossing]}<br>` : ""}${tracks.trampled(x, y) ? "🫎 elgspor i sporet<br>" : ""}<strong>Løype: ${CONDITION_NAMES[tracks.condition(x, y, weather)]}</strong>
+      const rebuildable = crossing === Crossing.AtGrade && tracks.obstacle(x, y) !== null;
+      const how = touchOnly() ? "trykk på kryssingen" : "klikk på den med 👀 Se deg rundt";
+      action = `${crossing !== Crossing.None ? `🌉 ${CROSSING_NAMES[crossing]}${rebuildable ? ` · bygg om: ${how}` : ""}<br>` : ""}${tracks.trampled(x, y) ? "🫎 elgspor i sporet<br>" : ""}<strong>Løype: ${CONDITION_NAMES[tracks.condition(x, y, weather)]}</strong>
         (${Math.round(tracks.quality(x, y, weather) * 100)} %)<br>
         nysnø ${tracks.newSnow[i].toFixed(0)} cm · is ${Math.round(tracks.ice[i] * 100)} % · ${groomed}<br>${tillerLine(x, y, i)}
         ≈ ${Math.round(tracks.usage[i])} skiløpere siste døgnet`;
@@ -3142,6 +3153,67 @@ async function main() {
    * A tap with a finger. Building: on track it picks where to carry on from; elsewhere it lays a
    * planned route from the crew, when the crew stands on track close enough, or starts a stroke there.
    */
+  /** What a crossing is called: the road's name, or the railway. */
+  const crossingName = (x: number, y: number) =>
+    tracks.obstacle(x, y) === "rail" ? region.names.railway : map.roadName(x, y) ?? "veien";
+
+  /** Offer to rebuild the crossing a tile is part of; false when it is not one that can be. */
+  const rebuildCrossing = (x: number, y: number): boolean => {
+    const tiles = tracks.crossingAt(x, y);
+    const options = tiles ? tracks.rebuildOptions(tiles) : [];
+    if (!tiles || options.length === 0 || asking) {
+      return false;
+    }
+    const rail = tracks.obstacle(x, y) === "rail";
+    const name = crossingName(x, y);
+    const traffic = Math.max(...tiles.map(([tx, ty]) => tracks.traffic(tx, ty)));
+    asking = true;
+    const wasPaused = clock.paused;
+    clock.paused = true;
+    askCrossing(
+      {
+        title: `Bygge om kryssingen av ${name}`,
+        lead: `${rail ? RAIL_LEVEL_CROSSING.describe : roadTraffic(traffic).describe} I dag går løypa rett over, ${tiles.length} rute${tiles.length === 1 ? "" : "r"}. Den nye løypa må preppes før den blir fin.`,
+        options,
+      },
+      0,
+      budget,
+      (option) => {
+        asking = false;
+        clock.paused = wasPaused;
+        budget -= option.price;
+        tracks.rebuild(tiles, option.type);
+        showToast(`🌉 <strong>${option.name} er ferdig.</strong> ${rail ? "Ingen flere bommer for skiløperne eller Gunnar." : `Ingen flere luker i trafikken på ${name} å vente på.`}`);
+        redrawTracks();
+        refreshHud();
+      },
+      () => {
+        asking = false;
+        clock.paused = wasPaused;
+        refreshHud();
+      },
+    );
+    return true;
+  };
+
+  /** The crossings that still go straight over, one tile of each to find it by. */
+  const crossingsAtGrade = (): { x: number; y: number; tiles: number; name: string }[] => {
+    const seen = new Set<number>();
+    const out: { x: number; y: number; tiles: number; name: string }[] = [];
+    for (const [x, y] of tracks.each()) {
+      const i = map.index(x, y);
+      if (seen.has(i) || tracks.crossing[i] !== Crossing.AtGrade || !tracks.obstacle(x, y)) {
+        continue;
+      }
+      const tiles = tracks.crossingAt(x, y)!;
+      tiles.forEach(([tx, ty]) => seen.add(map.index(tx, ty)));
+      if (tracks.rebuildOptions(tiles).length > 0) {
+        out.push({ x, y, tiles: tiles.length, name: crossingName(x, y) });
+      }
+    }
+    return out;
+  };
+
   const tapTile = (tx: number, ty: number) => {
     if (tool === "garage") {
       const problem = garageProblem(tx, ty);
@@ -3175,6 +3247,9 @@ async function main() {
     const garage = fleet.garages.findIndex((g) => Math.max(Math.abs(g.x - tx), Math.abs(g.y - ty)) <= 1);
     if (garage >= 0 && tool === "build") {
       openKiosk(garage);
+      return;
+    }
+    if (tool === "build" && rebuildCrossing(tx, ty)) {
       return;
     }
     const station = tool === "build" ? alpine.stationNear(tx, ty) : undefined;
@@ -3641,6 +3716,9 @@ async function main() {
       const garage = fleet.garages.findIndex((g) => Math.max(Math.abs(g.x - lx), Math.abs(g.y - ly)) <= 1);
       if (garage >= 0) {
         openKiosk(garage);
+        return;
+      }
+      if (rebuildCrossing(lx, ly)) {
         return;
       }
       if (julehus.near(lx, ly)) {
