@@ -1,4 +1,4 @@
-import { region } from "./region";
+import { neighbourhood, region } from "./region";
 import { dayLabel } from "./clock";
 import { GameMap } from "./map";
 import { DayStats } from "./skiers";
@@ -120,7 +120,8 @@ function comments(input: ReportInput): string[] {
   const y = input.yesterday;
   const lines: string[] = [];
   if (input.incidents.length > 0) {
-    lines.push(pick(["Løypemaskina sto midt i Rv. 4 i går kveld. Kø helt til Grua. 😡", "Takk til løypelaget for at jeg fikk se en løypemaskin på riksveien. Barna jublet. Vogntoget mindre.", "Er det lov å kjøre tråkkemaskin over Rv. 4? Spør for en vogntogsjåfør."], input.day));
+    const road = region.names.mainRoad;
+    lines.push(pick([`Løypemaskina sto midt i ${road} i går kveld. Kø i flere kilometer. 😡`, "Takk til løypelaget for at jeg fikk se en løypemaskin på riksveien. Barna jublet. Vogntoget mindre.", `Er det lov å kjøre tråkkemaskin over ${road}? Spør for en vogntogsjåfør.`], input.day));
   }
   if (!y || y.skiers === 0) {
     return withLikes(lines, input.day);
@@ -130,7 +131,7 @@ function comments(input: ReportInput): string[] {
     lines.push("«Strålende forhold» sto det. Strålende for skøyteløpere, kanskje.");
   }
   if (happy > 0.7) {
-    lines.push(pick(["Takk for fantastisk spor i går! ❤️", "Beste løypene i hele Akershus, og det sier jeg ikke ofte.", "Kjørte tre runder. Kona lurer på hvor jeg er."], input.day));
+    lines.push(pick(["Takk for fantastisk spor i går! ❤️", "Beste løypene i hele fylket, og det sier jeg ikke ofte.", "Kjørte tre runder. Kona lurer på hvor jeg er."], input.day));
   } else if (happy > 0.45) {
     lines.push(pick(["Greit nok i går. Litt slitt mot slutten av dagen.", "Fint spor, men hvorfor er det alltid motbakke begge veier?"], input.day));
   } else {
@@ -139,7 +140,7 @@ function comments(input: ReportInput): string[] {
   if (y.skiers > 120) {
     lines.push(pick(["Fullt på parkeringen fra kl. 10. Kom med toget, folkens!", "Kø i sporet i går. KØ."], input.day + 1));
   }
-  lines.push(pick(["Hvem eier den blå Volvoen som står på tvers på P Hakadal?", "Noen som har sett en grønn vott ved Skansen?", "Er det lov å ha med seg kjelke i lysløypa? Spør for en venn.", "Elgen sto midt i sporet igjen. Den så ikke lei seg ut.", "Møtte en rødskjegget kar med to huskyer nede i dalen kl. 06. Så jeg syner?", "Hvem er det som suser forbi med to huskyer hver kveld? Hundene smilte til meg."], input.day + 2));
+  lines.push(pick(["Hvem eier den blå Volvoen som står på tvers på parkeringen?", `Noen som har sett en grønn vott ved ${neighbourhood(input.day)}?`, "Er det lov å ha med seg kjelke i lysløypa? Spør for en venn.", "Elgen sto midt i sporet igjen. Den så ikke lei seg ut.", "Møtte en rødskjegget kar med to huskyer nede i dalen kl. 06. Så jeg syner?", "Hvem er det som suser forbi med to huskyer hver kveld? Hundene smilte til meg."], input.day + 2));
   return withLikes(lines, input.day);
 }
 
@@ -234,7 +235,7 @@ export function writeReport(input: ReportInput): Report {
 
   const rosy = `
     <h3>${title}</h3>
-    <p><strong>Strålende forhold i hele Hakadal!</strong> ${share > 0.25 ? "Løypene er nykjørte og innbydende." : "Sporene ligger og venter på deg."}
+    <p><strong>Strålende forhold i hele ${region.title}!</strong> ${share > 0.25 ? "Løypene er nykjørte og innbydende." : "Sporene ligger og venter på deg."}
       ${input.snowSinceLast >= 1 ? "Herlig nysnø!" : ""}</p>
     <ul class="areas">${areaRows.map((a) => row(a, true)).join("")}</ul>
     <p>${forecastLine} Perfekt skivær!</p>

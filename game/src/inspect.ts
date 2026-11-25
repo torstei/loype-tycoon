@@ -85,7 +85,7 @@ const TRAIN_FACTS = [
   "Fire par ski i bagasjehyllene, og en pulk",
   "Konduktøren sier «neste stasjon» med ekstra innlevelse",
   "Noen sover allerede, enda det er tre stasjoner igjen",
-  "Wi-fi-en virker til Grorud",
+  "Wi-fi-en virker til første tunnel",
   "En gjeng med lycraløpere diskuterer smøring i bakerste vogn",
 ];
 

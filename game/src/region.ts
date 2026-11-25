@@ -21,6 +21,34 @@ export interface Names {
   skiArea: string;
   /** The shooting club whose members can run the waffle stand at weekends. */
   waffleClub: string;
+  /** "In" the place, as said locally: "i Hakadal", "på Lillehammer". */
+  at: string;
+  /** The people who live there: "hakadølene". */
+  locals: string;
+  /** Where skiers, letter writers and the people the paper talks to live. */
+  neighbourhoods: string[];
+  /**
+   * A neighbour further down, where the snow never lies as long, for the paper to tease: its name,
+   * the heading of its column, and its places, whose people the paper quotes. Null for none.
+   */
+  lowland: { name: string; heading: string; places: string[] } | null;
+  /** The big road the track has to cross. */
+  mainRoad: string;
+  /** Where skiers buy buns on the way home, as said in a sentence: "7-Eleven i Hakadal". */
+  shop: string;
+}
+
+/**
+ * Local texts to add to the game's own, with placeholders filled in as they are used: {title}, {at},
+ * {locals}, {sted} (a neighbourhood), {lavland} (the lowland's name), {vei} (the main road) and {avis} (the paper).
+ */
+export interface LocalTexts {
+  /** Posts in the group about anything but skiing. */
+  groupPosts: string[];
+  /** Letters to the paper. */
+  letters: { from: string; text: string; reply?: string }[];
+  /** News in brief from the lowland, about how little snow there is; shown only with a lowland. */
+  lowlandNews: string[];
 }
 
 /**
@@ -35,6 +63,7 @@ export interface RegionFile {
   climate?: { valley?: number; high?: number };
   /** A house whose Christmas lights the whole place drives past in December. */
   christmasHouse?: Spot & { street: string };
+  texts?: Partial<LocalTexts>;
   /** Corrections to the places on the generated map. */
   places?: {
     rename?: Record<string, string>;
@@ -52,17 +81,36 @@ export interface Region {
   christmasHouse: { x: number; y: number; street: string } | null;
   /** Whether a railway crosses the map, so there is a train to write about. */
   railwayOnMap: boolean;
+  texts: LocalTexts;
 }
 
 /** The region being played, filled in by applyRegion before the game starts. */
 export const region: Region = {
   title: "",
   start: [0, 0],
-  names: { newspaper: "", group: "", unofficialGroup: "", railway: "", trainEnds: [], skiArea: "", waffleClub: "" },
+  names: {
+    newspaper: "",
+    group: "",
+    unofficialGroup: "",
+    railway: "",
+    trainEnds: [],
+    skiArea: "",
+    waffleClub: "",
+    at: "",
+    locals: "",
+    neighbourhoods: [],
+    lowland: null,
+    mainRoad: "",
+    shop: "",
+  },
   climate: { valley: 200, high: 500 },
   christmasHouse: null,
   railwayOnMap: false,
+  texts: { groupPosts: [], letters: [], lowlandNews: [] },
 };
+
+/** How many of the named places nearest the start count as its neighbourhoods. */
+const NEIGHBOURHOODS = 8;
 
 /** How much higher the snowy upper slopes are than the valley, when the region file does not say. */
 const HIGH_ABOVE_VALLEY = 300;
@@ -118,6 +166,17 @@ function startPoint(map: GameMap, title: string): [number, number] {
   return p ? [p.x, p.y] : [Math.floor(mx), Math.floor(my)];
 }
 
+/** The busiest named road on the map, by its number where it has one: "Rv. 4" rather than "Hadelandsveien (Rv. 4)". */
+function busiestRoad(map: GameMap): string | null {
+  let best: { name: string; traffic: number } | null = null;
+  for (const l of map.lines) {
+    if (l.kind === "road_name" && l.name && (l.traffic ?? 0) > (best?.traffic ?? 1)) {
+      best = { name: l.name, traffic: l.traffic! };
+    }
+  }
+  return best ? (best.name.match(/\(([^)]+)\)$/)?.[1] ?? best.name) : null;
+}
+
 /** Fetch a map's region file; a map without one plays with names made from its title. */
 export async function loadRegionFile(name: string): Promise<RegionFile> {
   try {
@@ -148,6 +207,10 @@ export function applyRegion(map: GameMap, file: RegionFile) {
   const title = file.title ?? map.title;
   region.title = title;
   region.start = (file.start && locate(map, file.start)) || startPoint(map, title);
+  const at = file.names?.at ?? `i ${title}`;
+  const named = map.pois.filter((p) => p.kind === "place" && p.name && p.name !== title);
+  const [sx, sy] = region.start;
+  const neighbourhoods = [...named].sort((a, b) => Math.hypot(a.x - sx, a.y - sy) - Math.hypot(b.x - sx, b.y - sy)).slice(0, NEIGHBOURHOODS).map((p) => p.name!);
   region.names = {
     newspaper: "Lokalavisa",
     group: `Preppestatus ${title}`,
@@ -156,8 +219,15 @@ export function applyRegion(map: GameMap, file: RegionFile) {
     trainEnds: [],
     skiArea: "alpinbakken",
     waffleClub: `${title} Skytterlag`,
+    at,
+    locals: "folk i bygda",
+    neighbourhoods: neighbourhoods.length ? neighbourhoods : [title],
+    lowland: null,
+    mainRoad: busiestRoad(map) ?? "riksveien",
+    shop: "butikken",
     ...file.names,
   };
+  region.texts = { groupPosts: [], letters: [], lowlandNews: [], ...file.texts };
   const valley = file.climate?.valley ?? map.elevationAt(...region.start);
   region.climate = { valley, high: file.climate?.high ?? valley + HIGH_ABOVE_VALLEY };
   const house = file.christmasHouse ? locate(map, file.christmasHouse) : null;
@@ -167,3 +237,26 @@ export function applyRegion(map: GameMap, file: RegionFile) {
 
 /** A name for use mid-sentence or at the start of one: "jernbanen" becomes "Jernbanen". */
 export const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+function hash(seed: number): number {
+  const v = Math.sin(seed * 78.233 + 12.9898) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+/** One of the neighbourhoods, the same one every time for a seed. */
+export const neighbourhood = (seed: number) => region.names.neighbourhoods[Math.floor(hash(seed) * region.names.neighbourhoods.length)];
+
+/** A local text with its placeholders filled in; {sted} is a neighbourhood picked by the seed. */
+export function fill(text: string, seed: number): string {
+  const n = region.names;
+  const values: Record<string, string> = {
+    title: region.title,
+    at: n.at,
+    locals: n.locals,
+    sted: neighbourhood(seed),
+    lavland: n.lowland?.name ?? "",
+    vei: n.mainRoad,
+    avis: n.newspaper,
+  };
+  return text.replace(/\{(\w+)\}/g, (all, key: string) => values[key] ?? all);
+}

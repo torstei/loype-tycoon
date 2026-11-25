@@ -1,3 +1,4 @@
+import { region } from "./region";
 import { Container, Graphics, Text } from "pixi.js";
 import { GameMap } from "./map";
 import { PX } from "./render";
@@ -452,7 +453,7 @@ export class Groomer {
       this.status = traffic === RAIL_LEVEL_CROSSING ? "Venter ved bommen på planovergangen" : "Venter på en luke i trafikken";
     }
     if (Math.random() < traffic.incident) {
-      const road = tracks.roadName(x, y) ?? "riksveien";
+      const road = tracks.roadName(x, y) ?? region.names.mainRoad;
       ledger.notify(
         `🚜 ${this.name} sperret ${road} i ${2 + Math.floor(Math.random() * 9)} minutter. Vogntogsjåførene var ikke imponert.`,
         road,
